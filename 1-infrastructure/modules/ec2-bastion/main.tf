@@ -1,5 +1,5 @@
 # ============================================================================
-# EC2 BASTION MODULE
+# EC2 BASTION MODULE - PRODUCTION GRADE SECURITY
 # ============================================================================
 
 # Get latest Amazon Linux 2 AMI
@@ -18,22 +18,22 @@ data "aws_ami" "amazon_linux_2" {
   }
 }
 
-# Bastion Security Group
+# Bastion Security Group - Restricted SSH Access
 resource "aws_security_group" "bastion" {
   name        = "${var.project_name}-${var.environment}-bastion-sg"
-  description = "Security group for bastion host - SSH access"
+  description = "Security group for bastion host - restricted SSH access"
   vpc_id      = var.vpc_id
 
-  # SSH access from anywhere (for emergency access)
+  # SSH access from allowed CIDRs only (your office/home IP)
   ingress {
-    description = "SSH access"
+    description = "SSH access from allowed IPs"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.allowed_cidrs
   }
 
-  # Allow all outbound traffic
+  # Allow all outbound traffic (bastion needs to reach EKS API and nodes)
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -51,13 +51,11 @@ resource "aws_security_group" "bastion" {
 }
 
 # Use existing AWS key pair (created manually in AWS Console)
-# User must create key pair in AWS Console first and download .pem file
-# Then copy .pem file content to keys/<key-name>.pem in this repo
 data "aws_key_pair" "bastion" {
   key_name = var.key_name
 }
 
-# Elastic IP for bastion
+# Elastic IP for bastion (static IP for whitelisting)
 resource "aws_eip" "bastion" {
   domain   = "vpc"
   instance = aws_instance.bastion.id
@@ -81,7 +79,7 @@ resource "aws_instance" "bastion" {
   vpc_security_group_ids = [aws_security_group.bastion.id]
   iam_instance_profile   = var.iam_instance_profile_name
 
-  # Enable IMDSv2
+  # Enable IMDSv2 (prevents SSRF attacks)
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
@@ -96,6 +94,7 @@ resource "aws_instance" "bastion" {
     delete_on_termination = true
   }
 
+  # Install SSM agent for secure access without SSH
   user_data = <<-EOF
               #!/bin/bash
               yum update -y

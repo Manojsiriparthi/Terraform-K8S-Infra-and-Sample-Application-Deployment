@@ -35,6 +35,7 @@ module "ec2_bastion" {
   public_subnet_id          = module.vpc.public_subnet_ids[0]
   instance_type             = var.bastion_instance_type
   key_name                  = var.bastion_key_name
+  allowed_cidrs             = var.bastion_allowed_cidrs
   iam_instance_profile_name = module.iam.bastion_instance_profile_name
   common_tags               = local.common_tags
 

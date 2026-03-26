@@ -1,5 +1,5 @@
 # ============================================================================
-# EKS MODULE
+# EKS MODULE - PRODUCTION GRADE SECURITY
 # ============================================================================
 
 # EKS Cluster Security Group
@@ -10,14 +10,14 @@ resource "aws_security_group" "eks_cluster" {
 
   # Allow HTTPS from nodes to cluster
   ingress {
-    description = "HTTPS from nodes"
+    description = "HTTPS from worker nodes"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    self        = true
+    security_groups = [aws_security_group.eks_nodes.id]
   }
 
-  # Allow all outbound
+  # Allow all outbound (cluster needs to communicate with AWS services)
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -34,22 +34,22 @@ resource "aws_security_group" "eks_cluster" {
   )
 }
 
-# EKS Node Security Group
+# EKS Node Security Group - Production Grade
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.project_name}-${var.environment}-eks-nodes-sg"
-  description = "Security group for EKS worker nodes"
+  description = "Security group for EKS worker nodes - production grade"
   vpc_id      = var.vpc_id
 
-  # Allow nodes to communicate with each other
+  # Allow nodes to communicate with each other (all protocols)
   ingress {
     description = "Node to node communication"
     from_port   = 0
-    to_port     = 65535
+    to_port     = 0
     protocol    = "-1"
     self        = true
   }
 
-  # Allow pods to communicate with cluster API
+  # Allow cluster control plane to communicate with nodes
   ingress {
     description     = "Cluster API to node"
     from_port       = 443
@@ -67,15 +67,16 @@ resource "aws_security_group" "eks_nodes" {
     security_groups = [aws_security_group.eks_cluster.id]
   }
 
-  # Allow CoreDNS
+  # Allow CoreDNS TCP
   ingress {
-    description = "CoreDNS"
+    description = "CoreDNS TCP"
     from_port   = 53
     to_port     = 53
     protocol    = "tcp"
     self        = true
   }
 
+  # Allow CoreDNS UDP
   ingress {
     description = "CoreDNS UDP"
     from_port   = 53
@@ -84,16 +85,16 @@ resource "aws_security_group" "eks_nodes" {
     self        = true
   }
 
-  # Allow NodePort services
+  # Allow NodePort services from within VPC only
   ingress {
-    description = "NodePort services"
+    description = "NodePort services from VPC"
     from_port   = 30000
     to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
 
-  # Allow all outbound
+  # Allow all outbound (nodes need internet for pulling images, AWS API calls)
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -109,6 +110,10 @@ resource "aws_security_group" "eks_nodes" {
       "kubernetes.io/cluster/${var.cluster_name}" = "owned"
     }
   )
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # EKS Cluster
@@ -145,7 +150,7 @@ resource "aws_eks_cluster" "main" {
   }
 }
 
-# Private Node Group
+# Private Node Group (for application workloads)
 resource "aws_eks_node_group" "private" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.project_name}-${var.environment}-private-nodes"
@@ -186,7 +191,7 @@ resource "aws_eks_node_group" "private" {
   }
 }
 
-# Public Node Group
+# Public Node Group (for load balancers and ingress)
 resource "aws_eks_node_group" "public" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${var.project_name}-${var.environment}-public-nodes"

@@ -190,6 +190,9 @@ deploy_layer4() {
     print_info "Applying network policies..."
     kubectl apply -f 4-kubernetes-manifests/network-policies.yaml
     
+    print_info "Deploying Gateway API routes..."
+    kubectl apply -f 4-kubernetes-manifests/gateway-routes.yaml
+    
     print_success "Kubernetes manifests deployed"
 }
 
@@ -219,6 +222,10 @@ deploy_layer6() {
     chmod +x install-monitoring.sh
     ./install-monitoring.sh
     cd ..
+    
+    print_info "Deploying monitoring Gateway routes..."
+    kubectl apply -f 4-kubernetes-manifests/monitoring-routes.yaml
+    
     print_success "Monitoring stack deployed"
 }
 
@@ -228,6 +235,7 @@ deploy_layer6() {
 
 destroy_layer6() {
     print_header "DESTROYING LAYER 6: Monitoring"
+    kubectl delete -f 4-kubernetes-manifests/monitoring-routes.yaml --ignore-not-found=true
     helm uninstall prometheus -n monitoring 2>/dev/null || true
     helm uninstall elasticsearch -n monitoring 2>/dev/null || true
     helm uninstall kibana -n monitoring 2>/dev/null || true
@@ -245,6 +253,7 @@ destroy_layer5() {
 
 destroy_layer4() {
     print_header "DESTROYING LAYER 4: Kubernetes Manifests"
+    kubectl delete -f 4-kubernetes-manifests/gateway-routes.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/network-policies.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/hpa.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/frontend.yaml --ignore-not-found=true

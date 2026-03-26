@@ -28,6 +28,12 @@ variable "key_name" {
   type        = string
 }
 
+variable "allowed_cidrs" {
+  description = "CIDR blocks allowed to SSH to bastion"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "iam_instance_profile_name" {
   description = "IAM instance profile name"
   type        = string

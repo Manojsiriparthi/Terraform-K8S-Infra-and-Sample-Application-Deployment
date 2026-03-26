@@ -77,6 +77,13 @@ variable "bastion_instance_type" {
 variable "bastion_key_name" {
   description = "SSH key name for bastion (must exist in AWS Console)"
   type        = string
+  default     = "terraform"
+}
+
+variable "bastion_allowed_cidrs" {
+  description = "CIDR blocks allowed to SSH to bastion (restrict to your IP for production)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 
 # ============================================================================
@@ -90,7 +97,7 @@ variable "cluster_version" {
 }
 
 variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access cluster API"
+  description = "CIDR blocks allowed to access EKS API (restrict to VPC CIDR for production)"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
