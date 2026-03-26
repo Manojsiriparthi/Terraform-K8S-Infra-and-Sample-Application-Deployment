@@ -156,39 +156,39 @@ deploy_layer4() {
     
     # Update image URLs
     print_info "Updating image URLs in manifests..."
-    sed -i.bak "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-k8s-manifests/backend.yaml
-    sed -i.bak "s|<REGION>|${AWS_REGION}|g" 4-k8s-manifests/backend.yaml
-    sed -i.bak "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-k8s-manifests/frontend.yaml
-    sed -i.bak "s|<REGION>|${AWS_REGION}|g" 4-k8s-manifests/frontend.yaml
-    rm -f 4-k8s-manifests/*.bak
+    sed -i.bak "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-kubernetes-manifests/backend.yaml
+    sed -i.bak "s|<REGION>|${AWS_REGION}|g" 4-kubernetes-manifests/backend.yaml
+    sed -i.bak "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-kubernetes-manifests/frontend.yaml
+    sed -i.bak "s|<REGION>|${AWS_REGION}|g" 4-kubernetes-manifests/frontend.yaml
+    rm -f 4-kubernetes-manifests/*.bak
     
     # Deploy in order
     print_info "Creating namespaces..."
-    kubectl apply -f 4-k8s-manifests/namespaces.yaml
+    kubectl apply -f 4-kubernetes-manifests/namespaces.yaml
     
     print_info "Configuring RBAC..."
-    kubectl apply -f 4-k8s-manifests/rbac.yaml
+    kubectl apply -f 4-kubernetes-manifests/rbac.yaml
     
     print_info "Creating storage..."
-    kubectl apply -f 4-k8s-manifests/storage.yaml
+    kubectl apply -f 4-kubernetes-manifests/storage.yaml
     
     print_info "Deploying database..."
-    kubectl apply -f 4-k8s-manifests/database.yaml
+    kubectl apply -f 4-kubernetes-manifests/database.yaml
     
     print_info "Waiting for database to be ready..."
     kubectl wait --for=condition=ready pod -l app=postgres -n application --timeout=300s || true
     
     print_info "Deploying backend..."
-    kubectl apply -f 4-k8s-manifests/backend.yaml
+    kubectl apply -f 4-kubernetes-manifests/backend.yaml
     
     print_info "Deploying frontend..."
-    kubectl apply -f 4-k8s-manifests/frontend.yaml
+    kubectl apply -f 4-kubernetes-manifests/frontend.yaml
     
     print_info "Configuring HPA..."
-    kubectl apply -f 4-k8s-manifests/hpa.yaml
+    kubectl apply -f 4-kubernetes-manifests/hpa.yaml
     
     print_info "Applying network policies..."
-    kubectl apply -f 4-k8s-manifests/network-policies.yaml
+    kubectl apply -f 4-kubernetes-manifests/network-policies.yaml
     
     print_success "Kubernetes manifests deployed"
 }
@@ -245,14 +245,14 @@ destroy_layer5() {
 
 destroy_layer4() {
     print_header "DESTROYING LAYER 4: Kubernetes Manifests"
-    kubectl delete -f 4-k8s-manifests/network-policies.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/hpa.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/frontend.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/backend.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/database.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/storage.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/rbac.yaml --ignore-not-found=true
-    kubectl delete -f 4-k8s-manifests/namespaces.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/network-policies.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/hpa.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/frontend.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/backend.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/database.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/storage.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/rbac.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/namespaces.yaml --ignore-not-found=true
     print_success "Layer 4 destroyed"
 }
 

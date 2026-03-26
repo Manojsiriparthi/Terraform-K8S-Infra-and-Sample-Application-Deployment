@@ -9,11 +9,10 @@ terraform.tfvars
 !terraform.tfvars.example
 
 # SSH Keys
-keys/
-*.pem
-*.pub
-*-key.pem
-*-key
+keys/*.pem
+!keys/.gitkeep
+!keys/README.md
+!keys/*.pem.example
 
 # OS
 .DS_Store

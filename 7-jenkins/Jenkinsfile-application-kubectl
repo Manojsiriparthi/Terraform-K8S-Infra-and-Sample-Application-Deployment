@@ -111,13 +111,13 @@ pipeline {
         stage('Update Manifests') {
             steps {
                 sh '''
-                    sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-k8s-manifests/backend.yaml
-                    sed -i "s|<REGION>|${AWS_REGION}|g" 4-k8s-manifests/backend.yaml
-                    sed -i "s|latest|${IMAGE_TAG}|g" 4-k8s-manifests/backend.yaml
+                    sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-kubernetes-manifests/backend.yaml
+                    sed -i "s|<REGION>|${AWS_REGION}|g" 4-kubernetes-manifests/backend.yaml
+                    sed -i "s|latest|${IMAGE_TAG}|g" 4-kubernetes-manifests/backend.yaml
                     
-                    sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-k8s-manifests/frontend.yaml
-                    sed -i "s|<REGION>|${AWS_REGION}|g" 4-k8s-manifests/frontend.yaml
-                    sed -i "s|latest|${IMAGE_TAG}|g" 4-k8s-manifests/frontend.yaml
+                    sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 4-kubernetes-manifests/frontend.yaml
+                    sed -i "s|<REGION>|${AWS_REGION}|g" 4-kubernetes-manifests/frontend.yaml
+                    sed -i "s|latest|${IMAGE_TAG}|g" 4-kubernetes-manifests/frontend.yaml
                 '''
             }
         }
@@ -134,18 +134,18 @@ pipeline {
         stage('Deploy Application') {
             steps {
                 sh '''
-                    kubectl apply -f 4-k8s-manifests/namespaces.yaml
-                    kubectl apply -f 4-k8s-manifests/rbac.yaml
-                    kubectl apply -f 4-k8s-manifests/storage.yaml
-                    kubectl apply -f 4-k8s-manifests/database.yaml
+                    kubectl apply -f 4-kubernetes-manifests/namespaces.yaml
+                    kubectl apply -f 4-kubernetes-manifests/rbac.yaml
+                    kubectl apply -f 4-kubernetes-manifests/storage.yaml
+                    kubectl apply -f 4-kubernetes-manifests/database.yaml
                     
                     echo "Waiting for database..."
                     kubectl wait --for=condition=ready pod -l app=postgres -n application --timeout=300s || true
                     
-                    kubectl apply -f 4-k8s-manifests/backend.yaml
-                    kubectl apply -f 4-k8s-manifests/frontend.yaml
-                    kubectl apply -f 4-k8s-manifests/hpa.yaml
-                    kubectl apply -f 4-k8s-manifests/network-policies.yaml
+                    kubectl apply -f 4-kubernetes-manifests/backend.yaml
+                    kubectl apply -f 4-kubernetes-manifests/frontend.yaml
+                    kubectl apply -f 4-kubernetes-manifests/hpa.yaml
+                    kubectl apply -f 4-kubernetes-manifests/network-policies.yaml
                 '''
             }
         }

@@ -16,7 +16,7 @@ shopease-eks-platform/
 │   └── modules/
 │       ├── vpc/                  # VPC, Subnets, NAT, IGW, Route Tables
 │       ├── iam/                  # IAM Roles and Policies
-│       ├── ec2-bastion/          # Bastion Host with SSH key generation
+│       ├── ec2-bastion/          # Bastion Host (uses existing AWS key pair)
 │       └── eks/                  # EKS Cluster, Node Groups, Security Groups
 │
 ├── 2-eks-addons/                 # Layer 2: Kubernetes Addons (Terraform)
@@ -52,7 +52,7 @@ shopease-eks-platform/
 │   └── database/
 │       └── init.sql              # PostgreSQL schema and seed data
 │
-├── 4-k8s-manifests/              # Layer 4: Kubernetes Manifests (kubectl)
+├── 4-kubernetes-manifests/       # Layer 4: Kubernetes Manifests (kubectl)
 │   ├── namespaces.yaml           # application, monitoring, production
 │   ├── rbac.yaml                 # All RBAC roles and bindings
 │   ├── storage.yaml              # PersistentVolumeClaims
@@ -84,24 +84,25 @@ shopease-eks-platform/
 │   ├── alerting-rules.yaml       # Alert definitions
 │   └── install-monitoring.sh     # Installation script
 │
-├── jenkins/                      # CI/CD Pipelines
+├── 7-jenkins/                    # CI/CD Pipelines
 │   ├── Jenkinsfile-infrastructure        # Infra deployment (1→2)
 │   ├── Jenkinsfile-application-kubectl   # App deployment with kubectl (3→4→6)
 │   ├── Jenkinsfile-application-helm      # App deployment with Helm (3→5→6)
 │   ├── Jenkinsfile-monitoring            # Monitoring deployment (6)
-│   └── README.md                         # Pipeline documentation
+│   └── README.md                          # Pipeline documentation
 │
-├── scripts/                      # Automation Scripts
-│   ├── prerequisites.sh          # Validate required tools
-│   └── (other helper scripts)
+├── 8-scripts/                    # Automation Scripts
+│   ├── run.sh                    # Main interactive deployment script
+│   └── prerequisites.sh          # Validate required tools
 │
 ├── keys/                         # SSH Keys (gitignored)
-│   └── .gitkeep                  # Keeps directory in git (actual .pem files ignored)
+│   ├── .gitkeep                  # Keeps directory in git (actual .pem files ignored)
+│   ├── README.md                 # Instructions for key setup
+│   └── shopease-bastion-key.pem.example  # Example PEM file template
 │
-├── run.sh                        # Main deployment script (interactive)
 ├── .gitignore                    # Git ignore rules
-├── README.md                     # This file
-└── VALIDATION_REPORT.md          # Validation results
+├── LICENSE                       # Project license
+└── README.md                     # This file
 ```
 
 ## 📖 Project Description
@@ -123,14 +124,14 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 - **IAM Module**: Defines all IAM roles and policies needed for the platform. Creates roles for the bastion host (with SSM access), EKS cluster control plane, and EKS worker nodes (with ECR, CNI, and SSM permissions).
 
-- **EC2 Bastion Module**: Deploys a hardened bastion host in a public subnet for secure cluster access. Automatically generates SSH key pairs, saves the private key to a secure location, and configures the instance with IMDSv2 and encrypted storage.
+- **EC2 Bastion Module**: Deploys a hardened bastion host in a public subnet for secure cluster access. Uses an existing AWS key pair that you create manually in the AWS Console. The bastion is configured with IMDSv2 and encrypted storage.
 
   **How PEM keys work**:
-  1. Terraform generates a 4096-bit RSA key pair during deployment
-  2. Public key is uploaded to AWS and associated with the bastion instance
-  3. Private key (.pem file) is saved to `keys/shopease-bastion-key.pem` with 0400 permissions
-  4. The `keys/` directory is gitignored to prevent committing sensitive keys
-  5. `.gitkeep` file ensures the empty directory is tracked in git
+  1. Before deployment, create a key pair in AWS Console (EC2 → Key Pairs → Create)
+  2. Download the .pem file and save it to `keys/shopease-bastion-key.pem` in your local repo
+  3. The `keys/` directory is gitignored to prevent committing sensitive keys to version control
+  4. `.gitkeep` file ensures the empty directory structure is tracked in git
+  5. Terraform uses `data.aws_key_pair` to reference your existing key pair (no generation)
   6. To access bastion: `ssh -i keys/shopease-bastion-key.pem ec2-user@<bastion-ip>`
   7. Alternative: Use AWS SSM Session Manager (no key needed): `aws ssm start-session --target <instance-id>`
 
@@ -178,7 +179,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ---
 
-### Layer 4: Kubernetes Manifests (4-k8s-manifests/)
+### Layer 4: Kubernetes Manifests (4-kubernetes-manifests/)
 
 **Purpose**: Provides raw Kubernetes YAML manifests for kubectl-based deployment.
 
@@ -239,7 +240,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ## 🛠️ Scripts and Automation
 
-### run.sh (Root Directory)
+### 8-scripts/run.sh
 
 **Purpose**: Single interactive script for all deployment and management operations.
 
@@ -262,11 +263,11 @@ The infrastructure is designed with modularity, security, and cost optimization 
 11. Show outputs
 12. Check prerequisites
 
-**Usage**: Simply run `./run.sh` and follow the interactive prompts.
+**Usage**: Simply run `./8-scripts/run.sh` and follow the interactive prompts.
 
 ---
 
-### scripts/prerequisites.sh
+### 8-scripts/prerequisites.sh
 
 **Purpose**: Standalone script to validate all required tools are installed before deployment.
 
@@ -281,7 +282,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ## 🔄 Jenkins CI/CD Pipelines
 
-### jenkins/Jenkinsfile-infrastructure
+### 7-jenkins/Jenkinsfile-infrastructure
 
 **Purpose**: Automates infrastructure deployment across multiple environments.
 
@@ -301,7 +302,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ---
 
-### jenkins/Jenkinsfile-application-kubectl
+### 7-jenkins/Jenkinsfile-application-kubectl
 
 **Purpose**: Builds, tests, and deploys application using Kubernetes manifests.
 
@@ -327,7 +328,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ---
 
-### jenkins/Jenkinsfile-application-helm
+### 7-jenkins/Jenkinsfile-application-helm
 
 **Purpose**: Builds, tests, and deploys application using Helm charts.
 
@@ -353,7 +354,7 @@ The infrastructure is designed with modularity, security, and cost optimization 
 
 ---
 
-### jenkins/Jenkinsfile-monitoring
+### 7-jenkins/Jenkinsfile-monitoring
 
 **Purpose**: Independently manages the monitoring stack.
 
@@ -377,13 +378,13 @@ The infrastructure is designed with modularity, security, and cost optimization 
 ### Prerequisites
 1. Install required tools: Terraform, AWS CLI, kubectl, Helm, Docker
 2. Configure AWS credentials: `aws configure`
-3. Verify setup: `./scripts/prerequisites.sh`
+3. Verify setup: `./8-scripts/prerequisites.sh`
 
 ### Method 1: Interactive Deployment (Recommended for Manual)
 
 ```bash
-chmod +x run.sh
-./run.sh
+chmod +x 8-scripts/run.sh
+./8-scripts/run.sh
 ```
 
 Select option 1 (kubectl) or 2 (Helm) from the menu. The script will:
