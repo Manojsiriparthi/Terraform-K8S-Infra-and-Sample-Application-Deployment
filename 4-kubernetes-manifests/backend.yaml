@@ -1,0 +1,135 @@
+---
+# Backend Deployment (Stateless)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: application
+  labels:
+    app: backend
+    tier: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+      tier: api
+  
+  template:
+    metadata:
+      labels:
+        app: backend
+        tier: api
+    spec:
+      # Run on private nodes
+      nodeSelector:
+        role: private
+      
+      containers:
+        - name: backend
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/shopease-backend:latest
+          ports:
+            - containerPort: 5000
+              name: http
+          
+          env:
+            - name: DATABASE_HOST
+              value: postgres-service
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          
+          # Resource limits
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Readiness probe
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+---
+# Backend Service (Internal)
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: application
+  labels:
+    app: backend
+    tier: api
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+    tier: api
+  ports:
+    - port: 5000
+      targetPort: 5000
+      protocol: TCP
+      name: http
+
+---
+# Backend Internal Ingress (ALB)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-ingress
+  namespace: application
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+  labels:
+    app: backend
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 5000

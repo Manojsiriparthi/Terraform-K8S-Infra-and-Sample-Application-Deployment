@@ -1,0 +1,44 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfplan
+*.tfvars
+!terraform.tfvars.example
+
+# SSH Keys
+keys/
+*.pem
+*.pub
+*-key.pem
+*-key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Kubernetes
+kubeconfig
+*.kubeconfig
+
+# Application
+node_modules/
+__pycache__/
+*.pyc
+dist/
+build/

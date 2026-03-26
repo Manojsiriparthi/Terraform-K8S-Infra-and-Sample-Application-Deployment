@@ -1,0 +1,169 @@
+{{- if .Values.database.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: {{ .Values.namespace.application }}
+type: Opaque
+stringData:
+  POSTGRES_USER: {{ .Values.database.credentials.username }}
+  POSTGRES_PASSWORD: {{ .Values.database.credentials.password }}
+  POSTGRES_DB: {{ .Values.database.credentials.database }}
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: {{ .Values.namespace.application }}
+  labels:
+    app: postgres
+    tier: database
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      tier: database
+  
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app: postgres
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.database.storage.className }}
+        resources:
+          requests:
+            storage: {{ .Values.database.storage.size }}
+  
+  template:
+    metadata:
+      labels:
+        app: postgres
+        tier: database
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.database.nodeSelector | nindent 8 }}
+      
+      containers:
+        - name: postgres
+          image: "{{ .Values.images.database.repository }}:{{ .Values.images.database.tag }}"
+          imagePullPolicy: {{ .Values.images.database.pullPolicy }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          
+          envFrom:
+            - secretRef:
+                name: postgres-secret
+          
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+          
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+          
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.database.credentials.username }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.database.credentials.username }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      
+      volumes:
+        - name: init-script
+          configMap:
+            name: postgres-init-script
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: {{ .Values.namespace.application }}
+  labels:
+    app: postgres
+    tier: database
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+    tier: database
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  namespace: {{ .Values.namespace.application }}
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price DECIMAL(10, 2) NOT NULL,
+        category VARCHAR(100),
+        image VARCHAR(500),
+        stock INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        customer_name VARCHAR(255) NOT NULL,
+        customer_email VARCHAR(255) NOT NULL,
+        total_amount DECIMAL(10, 2) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER REFERENCES orders(id),
+        product_id INTEGER REFERENCES products(id),
+        quantity INTEGER NOT NULL,
+        price DECIMAL(10, 2) NOT NULL
+    );
+
+    INSERT INTO products (name, description, price, category, image, stock) VALUES
+    ('Classic Leather Shoes', 'Premium leather formal shoes', 89.99, 'Shoes', 'https://via.placeholder.com/300x300?text=Leather+Shoes', 50),
+    ('Running Sneakers', 'Comfortable running shoes', 69.99, 'Shoes', 'https://via.placeholder.com/300x300?text=Sneakers', 100),
+    ('Designer Handbag', 'Elegant leather handbag', 149.99, 'Bags', 'https://via.placeholder.com/300x300?text=Handbag', 30),
+    ('Travel Backpack', 'Spacious travel backpack', 79.99, 'Bags', 'https://via.placeholder.com/300x300?text=Backpack', 75),
+    ('Summer Dress', 'Light and breezy summer dress', 59.99, 'Dresses', 'https://via.placeholder.com/300x300?text=Summer+Dress', 60),
+    ('Evening Gown', 'Elegant evening gown', 199.99, 'Dresses', 'https://via.placeholder.com/300x300?text=Evening+Gown', 20),
+    ('Casual T-Shirt', 'Comfortable cotton t-shirt', 24.99, 'Clothing', 'https://via.placeholder.com/300x300?text=T-Shirt', 200),
+    ('Denim Jeans', 'Classic blue denim jeans', 79.99, 'Clothing', 'https://via.placeholder.com/300x300?text=Jeans', 80),
+    ('Sunglasses', 'UV protection sunglasses', 39.99, 'Accessories', 'https://via.placeholder.com/300x300?text=Sunglasses', 150),
+    ('Leather Wallet', 'Genuine leather wallet', 49.99, 'Accessories', 'https://via.placeholder.com/300x300?text=Wallet', 100)
+    ON CONFLICT DO NOTHING;
+{{- end }}

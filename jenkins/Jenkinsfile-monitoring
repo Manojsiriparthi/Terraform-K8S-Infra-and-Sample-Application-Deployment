@@ -1,0 +1,111 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'qa', 'prod'],
+            description: 'Select environment'
+        )
+        string(
+            name: 'AWS_REGION',
+            defaultValue: 'us-east-1',
+            description: 'AWS Region'
+        )
+        choice(
+            name: 'ACTION',
+            choices: ['install', 'upgrade', 'uninstall'],
+            description: 'Monitoring action'
+        )
+    }
+    
+    environment {
+        AWS_REGION = "${params.AWS_REGION}"
+        ENVIRONMENT = "${params.ENVIRONMENT}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Configure kubectl') {
+            steps {
+                sh '''
+                    CLUSTER_NAME=$(cd 1-infrastructure && terraform workspace select ${ENVIRONMENT} && terraform output -raw cluster_name)
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                '''
+            }
+        }
+        
+        stage('Install/Upgrade Monitoring') {
+            when {
+                expression { params.ACTION != 'uninstall' }
+            }
+            steps {
+                dir('6-monitoring') {
+                    sh '''
+                        chmod +x install-monitoring.sh
+                        ./install-monitoring.sh
+                    '''
+                }
+            }
+        }
+        
+        stage('Uninstall Monitoring') {
+            when {
+                expression { params.ACTION == 'uninstall' }
+            }
+            steps {
+                sh '''
+                    helm uninstall prometheus -n monitoring || true
+                    helm uninstall elasticsearch -n monitoring || true
+                    helm uninstall kibana -n monitoring || true
+                    kubectl delete namespace monitoring --ignore-not-found=true
+                '''
+            }
+        }
+        
+        stage('Verify Monitoring') {
+            when {
+                expression { params.ACTION != 'uninstall' }
+            }
+            steps {
+                sh '''
+                    kubectl get all -n monitoring
+                    kubectl get svc -n monitoring
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                if (params.ACTION != 'uninstall') {
+                    echo """
+                    ==========================================
+                    Monitoring Stack Deployed!
+                    ==========================================
+                    Environment: ${params.ENVIRONMENT}
+                    
+                    Access Grafana:
+                      kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
+                      http://localhost:3000 (admin/changeme123)
+                    
+                    Access Kibana:
+                      kubectl get svc -n monitoring kibana-kibana
+                    ==========================================
+                    """
+                } else {
+                    echo "Monitoring stack uninstalled successfully"
+                }
+            }
+        }
+        failure {
+            echo "Monitoring ${params.ACTION} failed"
+        }
+    }
+}

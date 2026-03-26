@@ -1,0 +1,32 @@
+---
+# Application Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: application
+  labels:
+    name: application
+    environment: production
+    project: shopease
+
+---
+# Monitoring Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    environment: production
+    project: shopease
+
+---
+# Production Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    name: production
+    environment: production
+    project: shopease

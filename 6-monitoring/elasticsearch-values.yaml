@@ -1,0 +1,25 @@
+replicas: 2
+minimumMasterNodes: 1
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "2Gi"
+  limits:
+    cpu: "1000m"
+    memory: "4Gi"
+
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ebs-gp3
+  resources:
+    requests:
+      storage: 50Gi
+
+esConfig:
+  elasticsearch.yml: |
+    xpack.security.enabled: false
+    xpack.monitoring.collection.enabled: true
+
+persistence:
+  enabled: true

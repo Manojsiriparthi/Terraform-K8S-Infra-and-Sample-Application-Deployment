@@ -1,0 +1,46 @@
+# ============================================================================
+# Monitoring Stack Helm Chart Values
+# ============================================================================
+
+# Namespace
+namespace: monitoring
+
+# Prometheus Stack
+prometheus:
+  enabled: true
+  retention: 30d
+  storage:
+    size: 50Gi
+    className: ebs-gp3
+
+# Grafana
+grafana:
+  enabled: true
+  adminPassword: changeme123
+  service:
+    type: LoadBalancer
+  persistence:
+    enabled: true
+    size: 10Gi
+    className: ebs-gp3
+
+# Alertmanager
+alertmanager:
+  enabled: true
+  storage:
+    size: 10Gi
+    className: ebs-gp3
+
+# Elasticsearch
+elasticsearch:
+  enabled: true
+  replicas: 2
+  storage:
+    size: 50Gi
+    className: ebs-gp3
+
+# Kibana
+kibana:
+  enabled: true
+  service:
+    type: LoadBalancer

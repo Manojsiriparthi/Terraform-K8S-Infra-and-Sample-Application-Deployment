@@ -1,0 +1,18 @@
+---
+# PersistentVolumeClaim for PostgreSQL Database
+# Uses EBS CSI Driver with GP3 storage class
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: application
+  labels:
+    app: postgres
+    tier: database
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ebs-gp3
+  resources:
+    requests:
+      storage: 20Gi

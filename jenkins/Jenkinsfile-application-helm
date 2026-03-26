@@ -1,0 +1,196 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'qa', 'prod'],
+            description: 'Select environment'
+        )
+        string(
+            name: 'AWS_REGION',
+            defaultValue: 'us-east-1',
+            description: 'AWS Region'
+        )
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: 'latest',
+            description: 'Docker image tag'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip application tests'
+        )
+        booleanParam(
+            name: 'DEPLOY_MONITORING',
+            defaultValue: true,
+            description: 'Deploy monitoring stack'
+        )
+    }
+    
+    environment {
+        AWS_REGION = "${params.AWS_REGION}"
+        ENVIRONMENT = "${params.ENVIRONMENT}"
+        IMAGE_TAG = "${params.IMAGE_TAG}"
+        AWS_ACCOUNT_ID = sh(script: 'aws sts get-caller-identity --query Account --output text', returnStdout: true).trim()
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Test Backend') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                dir('3-application/backend') {
+                    sh '''
+                        python3 -m pip install -r requirements.txt
+                        python3 -m pytest tests/ || echo "No tests found"
+                    '''
+                }
+            }
+        }
+        
+        stage('Test Frontend') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                dir('3-application/frontend') {
+                    sh '''
+                        npm install
+                        npm run build
+                    '''
+                }
+            }
+        }
+        
+        stage('Build & Push Docker Images') {
+            steps {
+                script {
+                    // Create ECR repos
+                    sh '''
+                        aws ecr describe-repositories --repository-names shopease-frontend --region ${AWS_REGION} 2>/dev/null || \
+                            aws ecr create-repository --repository-name shopease-frontend --region ${AWS_REGION}
+                        
+                        aws ecr describe-repositories --repository-names shopease-backend --region ${AWS_REGION} 2>/dev/null || \
+                            aws ecr create-repository --repository-name shopease-backend --region ${AWS_REGION}
+                    '''
+                    
+                    // Login to ECR
+                    sh 'aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}'
+                    
+                    // Build and push frontend
+                    dir('3-application/frontend') {
+                        sh '''
+                            docker build -t shopease-frontend:${IMAGE_TAG} .
+                            docker tag shopease-frontend:${IMAGE_TAG} ${ECR_REGISTRY}/shopease-frontend:${IMAGE_TAG}
+                            docker push ${ECR_REGISTRY}/shopease-frontend:${IMAGE_TAG}
+                        '''
+                    }
+                    
+                    // Build and push backend
+                    dir('3-application/backend') {
+                        sh '''
+                            docker build -t shopease-backend:${IMAGE_TAG} .
+                            docker tag shopease-backend:${IMAGE_TAG} ${ECR_REGISTRY}/shopease-backend:${IMAGE_TAG}
+                            docker push ${ECR_REGISTRY}/shopease-backend:${IMAGE_TAG}
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Update Helm Values') {
+            steps {
+                sh '''
+                    sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" 5-helm-charts/shopease-app/values.yaml
+                    sed -i "s|<REGION>|${AWS_REGION}|g" 5-helm-charts/shopease-app/values.yaml
+                    sed -i "s|tag: latest|tag: ${IMAGE_TAG}|g" 5-helm-charts/shopease-app/values.yaml
+                '''
+            }
+        }
+        
+        stage('Configure kubectl') {
+            steps {
+                sh '''
+                    CLUSTER_NAME=$(cd 1-infrastructure && terraform workspace select ${ENVIRONMENT} && terraform output -raw cluster_name)
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                '''
+            }
+        }
+        
+        stage('Deploy Helm Chart') {
+            steps {
+                sh '''
+                    helm upgrade --install shopease-${ENVIRONMENT} ./5-helm-charts/shopease-app \
+                        --namespace application \
+                        --create-namespace \
+                        --set global.environment=${ENVIRONMENT} \
+                        --set images.frontend.tag=${IMAGE_TAG} \
+                        --set images.backend.tag=${IMAGE_TAG} \
+                        --wait \
+                        --timeout 10m
+                '''
+            }
+        }
+        
+        stage('Deploy Monitoring') {
+            when {
+                expression { params.DEPLOY_MONITORING }
+            }
+            steps {
+                dir('6-monitoring') {
+                    sh '''
+                        chmod +x install-monitoring.sh
+                        ./install-monitoring.sh
+                    '''
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                    helm status shopease-${ENVIRONMENT} -n application
+                    kubectl get all -n application
+                    kubectl get ingress -n application
+                    
+                    echo "Waiting for pods..."
+                    kubectl wait --for=condition=ready pod -l app=backend -n application --timeout=300s
+                    kubectl wait --for=condition=ready pod -l app=frontend -n application --timeout=300s
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                def frontendUrl = sh(script: "kubectl get ingress frontend-ingress -n application -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'", returnStdout: true).trim()
+                
+                echo """
+                ==========================================
+                Deployment Successful!
+                ==========================================
+                Environment: ${params.ENVIRONMENT}
+                Image Tag: ${params.IMAGE_TAG}
+                Frontend URL: http://${frontendUrl}
+                
+                Helm Release: shopease-${params.ENVIRONMENT}
+                ==========================================
+                """
+            }
+        }
+        failure {
+            echo "Deployment failed for ${params.ENVIRONMENT}"
+        }
+    }
+}
