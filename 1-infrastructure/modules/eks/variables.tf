@@ -48,11 +48,6 @@ variable "node_role_arn" {
   type        = string
 }
 
-variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access cluster API"
-  type        = list(string)
-}
-
 variable "enabled_cluster_log_types" {
   description = "EKS control plane log types"
   type        = list(string)

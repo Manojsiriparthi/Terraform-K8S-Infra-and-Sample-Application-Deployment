@@ -56,7 +56,6 @@ module "eks" {
   public_subnet_ids           = module.vpc.public_subnet_ids
   cluster_role_arn            = module.iam.eks_cluster_role_arn
   node_role_arn               = module.iam.eks_node_role_arn
-  allowed_cidr_blocks         = var.allowed_cidr_blocks
   enabled_cluster_log_types   = var.enabled_cluster_log_types
   private_node_instance_types = var.private_node_instance_types
   private_node_desired_size   = var.private_node_desired_size

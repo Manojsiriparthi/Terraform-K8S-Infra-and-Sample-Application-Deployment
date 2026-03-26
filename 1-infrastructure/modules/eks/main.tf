@@ -8,24 +8,6 @@ resource "aws_security_group" "eks_cluster" {
   description = "Security group for EKS cluster control plane"
   vpc_id      = var.vpc_id
 
-  # Allow HTTPS from nodes to cluster
-  ingress {
-    description = "HTTPS from worker nodes"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    security_groups = [aws_security_group.eks_nodes.id]
-  }
-
-  # Allow all outbound (cluster needs to communicate with AWS services)
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   tags = merge(
     var.common_tags,
     {
@@ -34,74 +16,33 @@ resource "aws_security_group" "eks_cluster" {
   )
 }
 
+# Cluster SG Rule: Allow HTTPS from nodes
+resource "aws_security_group_rule" "cluster_ingress_nodes_https" {
+  type                     = "ingress"
+  description              = "HTTPS from worker nodes"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_cluster.id
+  source_security_group_id = aws_security_group.eks_nodes.id
+}
+
+# Cluster SG Rule: Allow all outbound
+resource "aws_security_group_rule" "cluster_egress_all" {
+  type              = "egress"
+  description       = "Allow all outbound"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.eks_cluster.id
+}
+
 # EKS Node Security Group - Production Grade
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.project_name}-${var.environment}-eks-nodes-sg"
   description = "Security group for EKS worker nodes - production grade"
   vpc_id      = var.vpc_id
-
-  # Allow nodes to communicate with each other (all protocols)
-  ingress {
-    description = "Node to node communication"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    self        = true
-  }
-
-  # Allow cluster control plane to communicate with nodes
-  ingress {
-    description     = "Cluster API to node"
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_cluster.id]
-  }
-
-  # Allow kubelet API from cluster
-  ingress {
-    description     = "Cluster to node kubelet"
-    from_port       = 10250
-    to_port         = 10250
-    protocol        = "tcp"
-    security_groups = [aws_security_group.eks_cluster.id]
-  }
-
-  # Allow CoreDNS TCP
-  ingress {
-    description = "CoreDNS TCP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    self        = true
-  }
-
-  # Allow CoreDNS UDP
-  ingress {
-    description = "CoreDNS UDP"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    self        = true
-  }
-
-  # Allow NodePort services from within VPC only
-  ingress {
-    description = "NodePort services from VPC"
-    from_port   = 30000
-    to_port     = 32767
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  # Allow all outbound (nodes need internet for pulling images, AWS API calls)
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   tags = merge(
     var.common_tags,
@@ -116,6 +57,83 @@ resource "aws_security_group" "eks_nodes" {
   }
 }
 
+# Node SG Rule: Node to node communication
+resource "aws_security_group_rule" "nodes_ingress_self" {
+  type              = "ingress"
+  description       = "Node to node communication"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.eks_nodes.id
+  self              = true
+}
+
+# Node SG Rule: Cluster API to node
+resource "aws_security_group_rule" "nodes_ingress_cluster_https" {
+  type                     = "ingress"
+  description              = "Cluster API to node"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+}
+
+# Node SG Rule: Cluster to node kubelet
+resource "aws_security_group_rule" "nodes_ingress_cluster_kubelet" {
+  type                     = "ingress"
+  description              = "Cluster to node kubelet"
+  from_port                = 10250
+  to_port                  = 10250
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+}
+
+# Node SG Rule: CoreDNS TCP
+resource "aws_security_group_rule" "nodes_ingress_coredns_tcp" {
+  type              = "ingress"
+  description       = "CoreDNS TCP"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  security_group_id = aws_security_group.eks_nodes.id
+  self              = true
+}
+
+# Node SG Rule: CoreDNS UDP
+resource "aws_security_group_rule" "nodes_ingress_coredns_udp" {
+  type              = "ingress"
+  description       = "CoreDNS UDP"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  security_group_id = aws_security_group.eks_nodes.id
+  self              = true
+}
+
+# Node SG Rule: NodePort services from VPC only
+resource "aws_security_group_rule" "nodes_ingress_nodeport" {
+  type              = "ingress"
+  description       = "NodePort services from VPC"
+  from_port         = 30000
+  to_port           = 32767
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.eks_nodes.id
+}
+
+# Node SG Rule: Allow all outbound
+resource "aws_security_group_rule" "nodes_egress_all" {
+  type              = "egress"
+  description       = "Allow all outbound"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.eks_nodes.id
+}
+
 # EKS Cluster
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
@@ -125,8 +143,7 @@ resource "aws_eks_cluster" "main" {
   vpc_config {
     subnet_ids              = concat(var.private_subnet_ids, var.public_subnet_ids)
     endpoint_private_access = true
-    endpoint_public_access  = true
-    public_access_cidrs     = var.allowed_cidr_blocks
+    endpoint_public_access  = false
     security_group_ids      = [aws_security_group.eks_cluster.id]
   }
 
@@ -145,8 +162,7 @@ resource "aws_eks_cluster" "main" {
   ]
 
   lifecycle {
-    create_before_destroy = true
-    ignore_changes        = [access_config[0].bootstrap_cluster_creator_admin_permissions]
+    ignore_changes = [access_config[0].bootstrap_cluster_creator_admin_permissions]
   }
 }
 
@@ -186,8 +202,7 @@ resource "aws_eks_node_group" "private" {
   depends_on = [aws_eks_cluster.main]
 
   lifecycle {
-    create_before_destroy = true
-    ignore_changes        = [scaling_config[0].desired_size]
+    ignore_changes = [scaling_config[0].desired_size]
   }
 }
 
@@ -227,8 +242,7 @@ resource "aws_eks_node_group" "public" {
   depends_on = [aws_eks_cluster.main]
 
   lifecycle {
-    create_before_destroy = true
-    ignore_changes        = [scaling_config[0].desired_size]
+    ignore_changes = [scaling_config[0].desired_size]
   }
 }
 

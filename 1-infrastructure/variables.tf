@@ -96,12 +96,6 @@ variable "cluster_version" {
   default     = "1.28"
 }
 
-variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access EKS API (restrict to VPC CIDR for production)"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
 variable "enabled_cluster_log_types" {
   description = "EKS control plane log types"
   type        = list(string)

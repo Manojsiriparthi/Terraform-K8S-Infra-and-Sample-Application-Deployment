@@ -283,7 +283,77 @@ destroy_layer2() {
 destroy_layer1() {
     print_header "DESTROYING LAYER 1: Infrastructure"
     cd 1-infrastructure
+    
+    # Get VPC ID before destroying
+    VPC_ID=$(terraform output -raw vpc_id 2>/dev/null || echo "")
+    
+    # Step 1: Destroy EKS Node Groups
+    print_info "Destroying EKS Node Groups..."
+    terraform destroy -auto-approve \
+      -target=module.eks.aws_eks_node_group.private \
+      -target=module.eks.aws_eks_node_group.public 2>/dev/null || true
+    print_success "Node groups destroyed, waiting for ENIs..."
+    sleep 90
+    
+    # Step 2: Destroy EKS Addons
+    print_info "Destroying EKS Addons..."
+    terraform destroy -auto-approve \
+      -target=module.eks.aws_eks_addon.vpc_cni \
+      -target=module.eks.aws_eks_addon.kube_proxy \
+      -target=module.eks.aws_eks_addon.coredns 2>/dev/null || true
+    sleep 10
+    
+    # Step 3: Destroy EKS Cluster
+    print_info "Destroying EKS Cluster..."
+    terraform destroy -auto-approve \
+      -target=module.eks.aws_eks_cluster.main 2>/dev/null || true
+    print_success "Cluster destroyed, waiting for cleanup..."
+    sleep 60
+    
+    # Step 4: Clean up AWS-created VPC Endpoints
+    if [ -n "$VPC_ID" ]; then
+      print_info "Cleaning up VPC Endpoints..."
+      ENDPOINTS=$(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query 'VpcEndpoints[*].VpcEndpointId' --output text 2>/dev/null || echo "")
+      if [ -n "$ENDPOINTS" ]; then
+        aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ENDPOINTS 2>/dev/null || true
+        print_success "VPC Endpoints deleted, waiting..."
+        sleep 30
+      fi
+    fi
+    
+    # Step 5: Destroy Security Groups
+    print_info "Destroying Security Groups..."
+    terraform destroy -auto-approve \
+      -target=module.eks.aws_security_group_rule.cluster_ingress_nodes_https \
+      -target=module.eks.aws_security_group_rule.cluster_egress_all \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_self \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_cluster_https \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_cluster_kubelet \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_coredns_tcp \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_coredns_udp \
+      -target=module.eks.aws_security_group_rule.nodes_ingress_nodeport \
+      -target=module.eks.aws_security_group_rule.nodes_egress_all \
+      -target=module.eks.aws_security_group.eks_cluster \
+      -target=module.eks.aws_security_group.eks_nodes 2>/dev/null || true
+    sleep 10
+    
+    # Step 6: Destroy Bastion
+    print_info "Destroying Bastion..."
+    terraform destroy -auto-approve -target=module.ec2_bastion 2>/dev/null || true
+    sleep 10
+    
+    # Step 7: Destroy NAT Gateways
+    print_info "Destroying NAT Gateways..."
+    terraform destroy -auto-approve \
+      -target=module.vpc.aws_nat_gateway.main \
+      -target=module.vpc.aws_eip.nat 2>/dev/null || true
+    print_success "NAT Gateways destroyed, waiting..."
+    sleep 60
+    
+    # Step 8: Destroy everything else
+    print_info "Destroying remaining resources..."
     terraform destroy -auto-approve
+    
     cd ..
     print_success "Layer 1 destroyed"
 }
@@ -404,13 +474,21 @@ show_menu() {
     echo "  3) Destroy kubectl deployment (6→4→3→2→1)"
     echo "  4) Destroy Helm deployment (6→5→3→2→1)"
     echo ""
-    echo -e "${YELLOW}INDIVIDUAL LAYERS:${NC}"
+    echo -e "${YELLOW}INDIVIDUAL LAYERS - DEPLOY:${NC}"
     echo "  5) Layer 1: Infrastructure (VPC, IAM, EKS, Bastion)"
     echo "  6) Layer 2: EKS Addons (OIDC, ALB Controller, Autoscaler, etc.)"
     echo "  7) Layer 3: Docker Images (Build & Push to ECR)"
     echo "  8) Layer 4: Kubernetes Manifests (kubectl apply)"
     echo "  9) Layer 5: Helm Chart (helm install)"
     echo "  10) Layer 6: Monitoring (Prometheus, Grafana, ELK)"
+    echo ""
+    echo -e "${RED}INDIVIDUAL LAYERS - DESTROY:${NC}"
+    echo "  13) Destroy Layer 1: Infrastructure"
+    echo "  14) Destroy Layer 2: EKS Addons"
+    echo "  15) Destroy Layer 3: Docker Images"
+    echo "  16) Destroy Layer 4: Kubernetes Manifests"
+    echo "  17) Destroy Layer 5: Helm Chart"
+    echo "  18) Destroy Layer 6: Monitoring"
     echo ""
     echo -e "${CYAN}UTILITIES:${NC}"
     echo "  11) Show outputs"
@@ -471,6 +549,24 @@ main() {
                 ;;
             12)
                 check_prerequisites
+                ;;
+            13)
+                destroy_layer1
+                ;;
+            14)
+                destroy_layer2
+                ;;
+            15)
+                destroy_layer3
+                ;;
+            16)
+                destroy_layer4
+                ;;
+            17)
+                destroy_layer5
+                ;;
+            18)
+                destroy_layer6
                 ;;
             0)
                 echo ""
