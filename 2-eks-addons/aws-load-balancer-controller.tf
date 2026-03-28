@@ -56,7 +56,7 @@ resource "helm_release" "aws_lb_controller" {
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
   namespace  = "kube-system"
-  version    = "1.6.2"
+  version    = "1.10.0"
 
   set {
     name  = "clusterName"
@@ -76,16 +76,6 @@ resource "helm_release" "aws_lb_controller" {
   set {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = aws_iam_role.aws_lb_controller.arn
-  }
-
-  set {
-    name  = "region"
-    value = var.aws_region
-  }
-
-  set {
-    name  = "vpcId"
-    value = local.vpc_id
   }
 
   depends_on = [aws_iam_role_policy_attachment.aws_lb_controller]

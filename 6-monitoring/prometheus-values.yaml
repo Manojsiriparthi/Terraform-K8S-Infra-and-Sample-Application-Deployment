@@ -1,6 +1,11 @@
 prometheus:
   prometheusSpec:
     retention: 30d
+    
+    # Prometheus configuration for /prometheus path
+    externalUrl: "http://localhost:9090/prometheus"
+    routePrefix: /prometheus
+    
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -20,18 +25,21 @@ prometheus:
 grafana:
   enabled: true
   adminPassword: changeme123
+  
+  # Grafana configuration for /grafana path
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      serve_from_sub_path: true
+  
   persistence:
     enabled: true
     storageClassName: ebs-gp3
     size: 10Gi
+  
+  # Disable Grafana's own ingress - we use monitoring-ingress.yaml instead
   ingress:
-    enabled: true
-    annotations:
-      kubernetes.io/ingress.class: alb
-      alb.ingress.kubernetes.io/scheme: internet-facing
-      alb.ingress.kubernetes.io/target-type: ip
-    hosts:
-      - grafana.shopease.local
+    enabled: false
 
 alertmanager:
   enabled: true

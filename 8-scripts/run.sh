@@ -92,6 +92,13 @@ deploy_layer1() {
     terraform apply tfplan
     rm -f tfplan
     cd ..
+    
+    # Configure kubectl after infrastructure is created
+    print_info "Configuring kubectl..."
+    CLUSTER_NAME=$(cd 1-infrastructure && terraform output -raw cluster_name)
+    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+    print_success "kubectl configured for ${CLUSTER_NAME}"
+    
     print_success "Infrastructure deployed"
 }
 
@@ -190,8 +197,11 @@ deploy_layer4() {
     print_info "Applying network policies..."
     kubectl apply -f 4-kubernetes-manifests/network-policies.yaml
     
-    print_info "Deploying Gateway API routes..."
-    kubectl apply -f 4-kubernetes-manifests/gateway-routes.yaml
+    print_info "Waiting for ALB Controller to be ready..."
+    kubectl wait --for=condition=available deployment/aws-load-balancer-controller -n kube-system --timeout=300s || true
+    
+    print_info "Waiting for ALBs to provision (this may take 2-3 minutes)..."
+    sleep 30
     
     print_success "Kubernetes manifests deployed"
 }
@@ -223,8 +233,11 @@ deploy_layer6() {
     ./install-monitoring.sh
     cd ..
     
-    print_info "Deploying monitoring Gateway routes..."
-    kubectl apply -f 4-kubernetes-manifests/monitoring-routes.yaml
+    print_info "Deploying monitoring ingress..."
+    kubectl apply -f 4-kubernetes-manifests/monitoring-ingress.yaml
+    
+    print_info "Waiting for monitoring ALB to provision (this may take 2-3 minutes)..."
+    sleep 30
     
     print_success "Monitoring stack deployed"
 }
@@ -235,7 +248,7 @@ deploy_layer6() {
 
 destroy_layer6() {
     print_header "DESTROYING LAYER 6: Monitoring"
-    kubectl delete -f 4-kubernetes-manifests/monitoring-routes.yaml --ignore-not-found=true
+    kubectl delete -f 4-kubernetes-manifests/monitoring-ingress.yaml --ignore-not-found=true
     helm uninstall prometheus -n monitoring 2>/dev/null || true
     helm uninstall elasticsearch -n monitoring 2>/dev/null || true
     helm uninstall kibana -n monitoring 2>/dev/null || true
@@ -253,7 +266,6 @@ destroy_layer5() {
 
 destroy_layer4() {
     print_header "DESTROYING LAYER 4: Kubernetes Manifests"
-    kubectl delete -f 4-kubernetes-manifests/gateway-routes.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/network-policies.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/hpa.yaml --ignore-not-found=true
     kubectl delete -f 4-kubernetes-manifests/frontend.yaml --ignore-not-found=true
@@ -350,7 +362,127 @@ destroy_layer1() {
     print_success "NAT Gateways destroyed, waiting..."
     sleep 60
     
-    # Step 8: Destroy everything else
+    # Step 8: Aggressively clean up ALL VPC dependencies
+    if [ -n "$VPC_ID" ]; then
+      print_info "Aggressively cleaning up ALL VPC dependencies..."
+      
+      # Delete all ENIs
+      print_info "Deleting ENIs..."
+      ENI_IDS=$(aws ec2 describe-network-interfaces --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null || echo "")
+      if [ -n "$ENI_IDS" ]; then
+        for ENI_ID in $ENI_IDS; do
+          ATTACHMENT_ID=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI_ID --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text 2>/dev/null || echo "")
+          if [ -n "$ATTACHMENT_ID" ] && [ "$ATTACHMENT_ID" != "None" ]; then
+            aws ec2 detach-network-interface --attachment-id $ATTACHMENT_ID --force 2>/dev/null || true
+            sleep 3
+          fi
+          aws ec2 delete-network-interface --network-interface-id $ENI_ID 2>/dev/null || true
+        done
+        sleep 10
+      fi
+      
+      # Delete all NAT Gateways (in case any remain)
+      print_info "Deleting NAT Gateways..."
+      NAT_GW_IDS=$(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$VPC_ID" "Name=state,Values=available" --query 'NatGateways[*].NatGatewayId' --output text 2>/dev/null || echo "")
+      if [ -n "$NAT_GW_IDS" ]; then
+        for NAT_ID in $NAT_GW_IDS; do
+          aws ec2 delete-nat-gateway --nat-gateway-id $NAT_ID 2>/dev/null || true
+        done
+        sleep 30
+      fi
+      
+      # Delete all Internet Gateways
+      print_info "Deleting Internet Gateways..."
+      IGW_IDS=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query 'InternetGateways[*].InternetGatewayId' --output text 2>/dev/null || echo "")
+      if [ -n "$IGW_IDS" ]; then
+        for IGW_ID in $IGW_IDS; do
+          aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID 2>/dev/null || true
+          aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all subnets
+      print_info "Deleting Subnets..."
+      SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text 2>/dev/null || echo "")
+      if [ -n "$SUBNET_IDS" ]; then
+        for SUBNET_ID in $SUBNET_IDS; do
+          aws ec2 delete-subnet --subnet-id $SUBNET_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all route tables (except main)
+      print_info "Deleting Route Tables..."
+      RT_IDS=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text 2>/dev/null || echo "")
+      if [ -n "$RT_IDS" ]; then
+        for RT_ID in $RT_IDS; do
+          # Disassociate all associations
+          ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-ids $RT_ID --query 'RouteTables[0].Associations[*].RouteTableAssociationId' --output text 2>/dev/null || echo "")
+          for ASSOC_ID in $ASSOC_IDS; do
+            aws ec2 disassociate-route-table --association-id $ASSOC_ID 2>/dev/null || true
+          done
+          aws ec2 delete-route-table --route-table-id $RT_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all security groups (except default)
+      print_info "Deleting Security Groups (including GuardDuty)..."
+      SG_IDS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null || echo "")
+      if [ -n "$SG_IDS" ]; then
+        # First pass: remove all rules (including from GuardDuty SGs)
+        for SG_ID in $SG_IDS; do
+          INGRESS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null || echo "[]")
+          EGRESS=$(aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress' --output json 2>/dev/null || echo "[]")
+          if [ "$INGRESS" != "[]" ]; then
+            aws ec2 revoke-security-group-ingress --group-id $SG_ID --ip-permissions "$INGRESS" 2>/dev/null || true
+          fi
+          if [ "$EGRESS" != "[]" ]; then
+            aws ec2 revoke-security-group-egress --group-id $SG_ID --ip-permissions "$EGRESS" 2>/dev/null || true
+          fi
+        done
+        sleep 5
+        # Second pass: delete security groups (including GuardDuty managed ones)
+        for SG_ID in $SG_IDS; do
+          print_info "Deleting security group: $SG_ID"
+          aws ec2 delete-security-group --group-id $SG_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all network ACLs (except default)
+      print_info "Deleting Network ACLs..."
+      NACL_IDS=$(aws ec2 describe-network-acls --filters "Name=vpc-id,Values=$VPC_ID" --query 'NetworkAcls[?IsDefault==`false`].NetworkAclId' --output text 2>/dev/null || echo "")
+      if [ -n "$NACL_IDS" ]; then
+        for NACL_ID in $NACL_IDS; do
+          aws ec2 delete-network-acl --network-acl-id $NACL_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all VPC peering connections
+      print_info "Deleting VPC Peering Connections..."
+      PEER_IDS=$(aws ec2 describe-vpc-peering-connections --filters "Name=requester-vpc-info.vpc-id,Values=$VPC_ID" --query 'VpcPeeringConnections[*].VpcPeeringConnectionId' --output text 2>/dev/null || echo "")
+      if [ -n "$PEER_IDS" ]; then
+        for PEER_ID in $PEER_IDS; do
+          aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id $PEER_ID 2>/dev/null || true
+        done
+        sleep 5
+      fi
+      
+      # Delete all VPC endpoints
+      print_info "Deleting VPC Endpoints..."
+      ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints --filters "Name=vpc-id,Values=$VPC_ID" --query 'VpcEndpoints[*].VpcEndpointId' --output text 2>/dev/null || echo "")
+      if [ -n "$ENDPOINT_IDS" ]; then
+        aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ENDPOINT_IDS 2>/dev/null || true
+        sleep 10
+      fi
+      
+      print_success "All VPC dependencies cleaned up"
+    fi
+    
+    # Step 9: Destroy everything else
     print_info "Destroying remaining resources..."
     terraform destroy -auto-approve
     
