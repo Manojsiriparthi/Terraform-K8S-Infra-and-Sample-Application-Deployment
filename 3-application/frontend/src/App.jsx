@@ -1,64 +1,100 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import Home from './pages/Home';
+import Cart from './pages/Cart';
+import Payment from './pages/Payment';
+import Profile from './pages/Profile';
 import './App.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
 function App() {
-  const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const fetchProducts = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/products`);
-      setProducts(response.data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      setLoading(false);
+  const addToCart = (product) => {
+    const existingItem = cart.find(item => item.id === product.id);
+    if (existingItem) {
+      setCart(cart.map(item => 
+        item.id === product.id 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+    } else {
+      setCart([...cart, { ...product, quantity: 1 }]);
     }
   };
 
-  const addToCart = (product) => {
-    setCart([...cart, product]);
+  const removeFromCart = (index) => {
+    setCart(cart.filter((_, i) => i !== index));
+  };
+
+  const updateQuantity = (index, newQuantity) => {
+    if (newQuantity <= 0) {
+      removeFromCart(index);
+    } else {
+      setCart(cart.map((item, i) => 
+        i === index ? { ...item, quantity: newQuantity } : item
+      ));
+    }
+  };
+
+  const clearCart = () => {
+    setCart([]);
+  };
+
+  const getTotalItems = () => {
+    return cart.reduce((total, item) => total + item.quantity, 0);
   };
 
   const getTotalPrice = () => {
-    return cart.reduce((total, item) => total + item.price, 0).toFixed(2);
+    return cart.reduce((total, item) => total + (item.price * item.quantity), 0).toFixed(2);
   };
 
-  if (loading) {
-    return <div className="loading">Loading ShopEase...</div>;
-  }
-
   return (
-    <div className="app">
-      <header className="header">
-        <h1>🛍️ ShopEase</h1>
-        <div className="cart-summary">
-          Cart: {cart.length} items | ${getTotalPrice()}
-        </div>
-      </header>
+    <Router>
+      <div className="app">
+        <header className="header">
+          <div className="header-content">
+            <Link to="/" className="logo">
+              <h1>🛍️ ShopEase</h1>
+            </Link>
+            
+            <nav className="nav">
+              <Link to="/">Home</Link>
+              <Link to="/cart">Cart</Link>
+              <Link to="/profile">Profile</Link>
+            </nav>
 
-      <main className="main">
-        <div className="products-grid">
-          {products.map((product) => (
-            <div key={product.id} className="product-card">
-              <img src={product.image} alt={product.name} />
-              <h3>{product.name}</h3>
-              <p className="category">{product.category}</p>
-              <p className="price">${product.price}</p>
-              <button onClick={() => addToCart(product)}>Add to Cart</button>
-            </div>
-          ))}
-        </div>
-      </main>
-    </div>
+            <Link to="/cart" className="cart-summary">
+              🛒 Cart: {getTotalItems()} items | ${getTotalPrice()}
+            </Link>
+          </div>
+        </header>
+
+        <main className="main">
+          <Routes>
+            <Route path="/" element={<Home addToCart={addToCart} />} />
+            <Route 
+              path="/cart" 
+              element={
+                <Cart 
+                  cart={cart} 
+                  removeFromCart={removeFromCart}
+                  updateQuantity={updateQuantity}
+                />
+              } 
+            />
+            <Route 
+              path="/payment" 
+              element={<Payment cart={cart} clearCart={clearCart} />} 
+            />
+            <Route path="/profile" element={<Profile />} />
+          </Routes>
+        </main>
+
+        <footer className="footer">
+          <p>&copy; 2024 ShopEase. All rights reserved.</p>
+        </footer>
+      </div>
+    </Router>
   );
 }
 

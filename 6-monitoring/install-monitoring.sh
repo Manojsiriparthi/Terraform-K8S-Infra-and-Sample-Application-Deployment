@@ -27,11 +27,18 @@ helm upgrade --install elasticsearch elastic/elasticsearch \
   --timeout 10m \
   --wait
 
-# Install Kibana
+# Install Kibana (using simple deployment instead of Helm)
 echo "Installing Kibana..."
 
 # Aggressive cleanup of any leftover Kibana resources
 echo "Cleaning up any existing Kibana resources..."
+
+# Uninstall existing Kibana helm release first
+helm uninstall kibana -n monitoring 2>/dev/null || true
+sleep 5
+
+# Delete all Kibana Kubernetes resources
+kubectl delete deployment kibana -n monitoring --ignore-not-found=true
 kubectl delete deployment kibana-kibana -n monitoring --ignore-not-found=true
 kubectl delete statefulset kibana-kibana -n monitoring --ignore-not-found=true
 kubectl delete service kibana-kibana -n monitoring --ignore-not-found=true
@@ -42,23 +49,22 @@ kubectl delete rolebinding post-delete-kibana-kibana -n monitoring --ignore-not-
 kubectl delete serviceaccount pre-install-kibana-kibana -n monitoring --ignore-not-found=true
 kubectl delete serviceaccount post-delete-kibana-kibana -n monitoring --ignore-not-found=true
 kubectl delete job -n monitoring -l app=kibana --ignore-not-found=true
-kubectl delete configmap -n monitoring -l app=kibana --ignore-not-found=true
 kubectl delete pod -n monitoring -l app=kibana --ignore-not-found=true
+kubectl delete secret -n monitoring -l app=kibana --ignore-not-found=true
+
+# Delete configmaps explicitly
+kubectl delete configmap kibana-kibana-helm-scripts -n monitoring --ignore-not-found=true
+kubectl delete configmap -n monitoring -l app=kibana --ignore-not-found=true
 
 # Wait for cleanup to complete
 echo "Waiting for cleanup to complete..."
-sleep 10
+sleep 15
 
-# Uninstall existing Kibana helm release if it exists
-helm uninstall kibana -n monitoring 2>/dev/null || true
-sleep 5
+echo "Deploying Kibana using Kubernetes manifests (no Helm)..."
+kubectl apply -f kibana-deployment.yaml
 
-echo "Installing fresh Kibana instance..."
-helm upgrade --install kibana elastic/kibana \
-  --namespace monitoring \
-  --values kibana-values.yaml \
-  --timeout 10m \
-  --wait
+echo "Waiting for Kibana to be ready..."
+kubectl wait --for=condition=available deployment/kibana -n monitoring --timeout=300s || true
 
 echo ""
 echo "=========================================="

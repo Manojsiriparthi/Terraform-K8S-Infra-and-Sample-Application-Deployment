@@ -94,6 +94,31 @@ resource "aws_iam_role_policy_attachment" "cloudwatch_container_insights" {
 # CLOUDWATCH OBSERVABILITY EKS ADDON
 # ============================================================================
 
+# Wait for AWS Load Balancer Controller webhook to be ready
+resource "null_resource" "wait_for_alb_webhook" {
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Waiting for AWS Load Balancer Controller webhook to be ready..."
+      kubectl wait --for=condition=available deployment/aws-load-balancer-controller \
+        -n kube-system --timeout=300s || true
+      
+      # Additional wait for webhook endpoints
+      for i in {1..30}; do
+        if kubectl get endpoints aws-load-balancer-webhook-service -n kube-system &>/dev/null; then
+          echo "Webhook endpoints are ready"
+          exit 0
+        fi
+        echo "Waiting for webhook endpoints... ($i/30)"
+        sleep 10
+      done
+      
+      echo "Webhook endpoints ready or timeout reached"
+    EOT
+  }
+
+  depends_on = [helm_release.aws_lb_controller]
+}
+
 resource "aws_eks_addon" "cloudwatch_observability" {
   cluster_name             = local.cluster_name
   addon_name               = "amazon-cloudwatch-observability"
@@ -107,6 +132,7 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 
   depends_on = [
     aws_iam_role_policy_attachment.cloudwatch_agent_server_policy,
-    aws_iam_role_policy_attachment.cloudwatch_container_insights
+    aws_iam_role_policy_attachment.cloudwatch_container_insights,
+    null_resource.wait_for_alb_webhook  # Wait for webhook to be ready
   ]
 }

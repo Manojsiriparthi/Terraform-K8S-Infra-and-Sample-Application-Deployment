@@ -3,10 +3,7 @@
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
-terraform.tfvars
 *.tfplan
-*.tfvars
-!terraform.tfvars.example
 
 # SSH Keys
 keys/*.pem
