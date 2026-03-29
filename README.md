@@ -53,7 +53,7 @@ A complete, production-ready e-commerce application deployed on AWS EKS with Ter
 │   ├── ebs-csi-driver.tf
 │   └── cloudwatch-observability.tf
 │
-├── 3-application/            # Application source code
+├── 3-application/           # Application source code
 │   ├── frontend/            # React frontend
 │   │   ├── src/
 │   │   │   ├── App.jsx      # Main app with routing
@@ -68,7 +68,7 @@ A complete, production-ready e-commerce application deployed on AWS EKS with Ter
 │   └── database/
 │       └── init.sql         # Database schema with 24 products
 │
-├── 4-kubernetes-manifests/   # Kubernetes YAML files
+├── 4-kubernetes-manifests/  # Kubernetes YAML files
 │   ├── namespaces.yaml
 │   ├── frontend.yaml        # Frontend deployment + public ALB
 │   ├── backend.yaml         # Backend deployment + internal ALB
@@ -79,11 +79,11 @@ A complete, production-ready e-commerce application deployed on AWS EKS with Ter
 │   ├── network-policies.yaml
 │   └── hpa.yaml
 │
-├── 5-helm-charts/            # Helm charts
+├── 5-helm-charts/           # Helm charts
 │   ├── shopease-app/        # Application Helm chart
 │   └── monitoring/          # Monitoring stack Helm chart
 │
-├── 6-monitoring/             # Monitoring configuration
+├── 6-monitoring/            # Monitoring configuration
 │   ├── prometheus-values.yaml
 │   ├── elasticsearch-values.yaml
 │   └── install-monitoring.sh
@@ -93,11 +93,11 @@ A complete, production-ready e-commerce application deployed on AWS EKS with Ter
 │   ├── Jenkinsfile-application-kubectl
 │   └── Jenkinsfile-application-helm
 │
-├── 8-scripts/                # Deployment scripts
+├── 8-scripts/               # Deployment scripts
 │   ├── run.sh               # Main deployment script
 │   └── prerequisites.sh     # Install prerequisites
 │
-└── README.md                 # This file
+└── README.md                # This file
 ```
 
 ## ✨ Features
