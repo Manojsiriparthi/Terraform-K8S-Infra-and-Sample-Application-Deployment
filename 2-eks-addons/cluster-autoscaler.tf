@@ -116,5 +116,64 @@ resource "helm_release" "cluster_autoscaler" {
     value = aws_iam_role.cluster_autoscaler.arn
   }
 
+  # High availability - 2 replicas
+  set {
+    name  = "replicaCount"
+    value = "2"
+  }
+
+  # Resource limits
+  set {
+    name  = "resources.requests.cpu"
+    value = "100m"
+  }
+
+  set {
+    name  = "resources.requests.memory"
+    value = "300Mi"
+  }
+
+  set {
+    name  = "resources.limits.cpu"
+    value = "200m"
+  }
+
+  set {
+    name  = "resources.limits.memory"
+    value = "600Mi"
+  }
+
+  # Autoscaler configuration
+  set {
+    name  = "extraArgs.balance-similar-node-groups"
+    value = "true"
+  }
+
+  set {
+    name  = "extraArgs.skip-nodes-with-system-pods"
+    value = "false"
+  }
+
+  set {
+    name  = "extraArgs.scale-down-enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "extraArgs.scale-down-delay-after-add"
+    value = "10m"
+  }
+
+  set {
+    name  = "extraArgs.scale-down-unneeded-time"
+    value = "10m"
+  }
+
+  # Support for persistent node group taints
+  set {
+    name  = "extraArgs.balance-similar-node-groups"
+    value = "true"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.cluster_autoscaler]
 }

@@ -149,3 +149,37 @@ variable "public_node_max_size" {
   type        = number
   default     = 2
 }
+
+# ============================================================================
+# PERSISTENT NODE GROUP VARIABLES (for stateful workloads)
+# ============================================================================
+
+variable "persistent_node_instance_types" {
+  description = "Persistent node instance types (for database/stateful workloads)"
+  type        = list(string)
+  default     = ["t3.xlarge"]
+}
+
+variable "persistent_node_desired_size" {
+  description = "Persistent node desired count"
+  type        = number
+  default     = 3
+}
+
+variable "persistent_node_min_size" {
+  description = "Persistent node minimum count"
+  type        = number
+  default     = 3
+}
+
+variable "persistent_node_max_size" {
+  description = "Persistent node maximum count"
+  type        = number
+  default     = 6
+}
+
+variable "persistent_node_disk_size" {
+  description = "Persistent node disk size in GB"
+  type        = number
+  default     = 100
+}

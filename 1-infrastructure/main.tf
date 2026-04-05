@@ -46,26 +46,32 @@ module "ec2_bastion" {
 module "eks" {
   source = "./modules/eks"
 
-  project_name                = var.project_name
-  environment                 = var.environment
-  cluster_name                = local.cluster_name
-  cluster_version             = var.cluster_version
-  vpc_id                      = module.vpc.vpc_id
-  vpc_cidr                    = var.vpc_cidr
-  private_subnet_ids          = module.vpc.private_subnet_ids
-  public_subnet_ids           = module.vpc.public_subnet_ids
-  cluster_role_arn            = module.iam.eks_cluster_role_arn
-  node_role_arn               = module.iam.eks_node_role_arn
-  enabled_cluster_log_types   = var.enabled_cluster_log_types
-  private_node_instance_types = var.private_node_instance_types
-  private_node_desired_size   = var.private_node_desired_size
-  private_node_min_size       = var.private_node_min_size
-  private_node_max_size       = var.private_node_max_size
-  public_node_instance_types  = var.public_node_instance_types
-  public_node_desired_size    = var.public_node_desired_size
-  public_node_min_size        = var.public_node_min_size
-  public_node_max_size        = var.public_node_max_size
-  common_tags                 = local.common_tags
+  project_name                    = var.project_name
+  environment                     = var.environment
+  cluster_name                    = local.cluster_name
+  cluster_version                 = var.cluster_version
+  vpc_id                          = module.vpc.vpc_id
+  vpc_cidr                        = var.vpc_cidr
+  private_subnet_ids              = module.vpc.private_subnet_ids
+  public_subnet_ids               = module.vpc.public_subnet_ids
+  cluster_role_arn                = module.iam.eks_cluster_role_arn
+  node_role_arn                   = module.iam.eks_node_role_arn
+  eks_secrets_kms_key_arn         = module.iam.eks_secrets_kms_key_arn
+  enabled_cluster_log_types       = var.enabled_cluster_log_types
+  private_node_instance_types     = var.private_node_instance_types
+  private_node_desired_size       = var.private_node_desired_size
+  private_node_min_size           = var.private_node_min_size
+  private_node_max_size           = var.private_node_max_size
+  public_node_instance_types      = var.public_node_instance_types
+  public_node_desired_size        = var.public_node_desired_size
+  public_node_min_size            = var.public_node_min_size
+  public_node_max_size            = var.public_node_max_size
+  persistent_node_instance_types  = var.persistent_node_instance_types
+  persistent_node_desired_size    = var.persistent_node_desired_size
+  persistent_node_min_size        = var.persistent_node_min_size
+  persistent_node_max_size        = var.persistent_node_max_size
+  persistent_node_disk_size       = var.persistent_node_disk_size
+  common_tags                     = local.common_tags
 
   depends_on = [module.vpc, module.iam]
 }

@@ -107,3 +107,270 @@ resource "aws_iam_role_policy_attachment" "eks_ssm_policy" {
   role       = aws_iam_role.eks_nodes.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
+
+# CloudWatch Logs policy for nodes
+resource "aws_iam_role_policy_attachment" "eks_cloudwatch_policy" {
+  role       = aws_iam_role.eks_nodes.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+# Custom policy for EBS volume management
+resource "aws_iam_policy" "eks_ebs_csi_policy" {
+  name        = "${var.project_name}-${var.environment}-ebs-csi-policy"
+  description = "Policy for EBS CSI driver"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateSnapshot",
+          "ec2:AttachVolume",
+          "ec2:DetachVolume",
+          "ec2:ModifyVolume",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeInstances",
+          "ec2:DescribeSnapshots",
+          "ec2:DescribeTags",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeVolumesModifications"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateTags"
+        ]
+        Resource = [
+          "arn:aws:ec2:*:*:volume/*",
+          "arn:aws:ec2:*:*:snapshot/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "ec2:CreateAction" = [
+              "CreateVolume",
+              "CreateSnapshot"
+            ]
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteTags"
+        ]
+        Resource = [
+          "arn:aws:ec2:*:*:volume/*",
+          "arn:aws:ec2:*:*:snapshot/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVolume"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "aws:RequestTag/ebs.csi.aws.com/cluster" = "true"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVolume"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "aws:RequestTag/CSIVolumeName" = "*"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteVolume"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "ec2:ResourceTag/ebs.csi.aws.com/cluster" = "true"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteVolume"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "ec2:ResourceTag/CSIVolumeName" = "*"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteVolume"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "ec2:ResourceTag/kubernetes.io/created-for/pvc/name" = "*"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteSnapshot"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "ec2:ResourceTag/CSIVolumeSnapshotName" = "*"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DeleteSnapshot"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "ec2:ResourceTag/ebs.csi.aws.com/cluster" = "true"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "eks_ebs_csi_policy" {
+  role       = aws_iam_role.eks_nodes.name
+  policy_arn = aws_iam_policy.eks_ebs_csi_policy.arn
+}
+
+# Custom policy for EFS access (for multi-AZ storage)
+resource "aws_iam_policy" "eks_efs_csi_policy" {
+  name        = "${var.project_name}-${var.environment}-efs-csi-policy"
+  description = "Policy for EFS CSI driver"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticfilesystem:DescribeAccessPoints",
+          "elasticfilesystem:DescribeFileSystems",
+          "elasticfilesystem:DescribeMountTargets",
+          "elasticfilesystem:TagResource"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticfilesystem:CreateAccessPoint"
+        ]
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "aws:RequestTag/efs.csi.aws.com/cluster" = "true"
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "elasticfilesystem:DeleteAccessPoint"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/efs.csi.aws.com/cluster" = "true"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "eks_efs_csi_policy" {
+  role       = aws_iam_role.eks_nodes.name
+  policy_arn = aws_iam_policy.eks_efs_csi_policy.arn
+}
+
+
+# ============================================================================
+# KMS KEY FOR EKS SECRETS ENCRYPTION
+# ============================================================================
+
+resource "aws_kms_key" "eks_secrets" {
+  description             = "KMS key for EKS secrets encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  tags = merge(
+    var.common_tags,
+    {
+      Name = "${var.project_name}-${var.environment}-eks-secrets-key"
+    }
+  )
+}
+
+resource "aws_kms_alias" "eks_secrets" {
+  name          = "alias/${var.project_name}-${var.environment}-eks-secrets"
+  target_key_id = aws_kms_key.eks_secrets.key_id
+}
+
+# KMS key policy to allow EKS to use it
+resource "aws_kms_key_policy" "eks_secrets" {
+  key_id = aws_kms_key.eks_secrets.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow EKS to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:Encrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+data "aws_caller_identity" "current" {}

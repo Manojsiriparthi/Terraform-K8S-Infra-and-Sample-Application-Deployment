@@ -144,8 +144,16 @@ resource "aws_eks_cluster" "main" {
     subnet_ids              = concat(var.private_subnet_ids, var.public_subnet_ids)
     endpoint_private_access = true
     endpoint_public_access  = true
-    public_access_cidrs     = ["0.0.0.0/0"]  # Restrict to your IP in production
+    public_access_cidrs     = ["0.0.0.0/0"]  # PRODUCTION: Restrict to your office/VPN IP
     security_group_ids      = [aws_security_group.eks_cluster.id]
+  }
+
+  # Enable secrets encryption at rest
+  encryption_config {
+    provider {
+      key_arn = var.eks_secrets_kms_key_arn
+    }
+    resources = ["secrets"]
   }
 
   enabled_cluster_log_types = var.enabled_cluster_log_types
@@ -247,6 +255,57 @@ resource "aws_eks_node_group" "public" {
   }
 }
 
+# Persistent Node Group (for database and stateful workloads)
+resource "aws_eks_node_group" "persistent" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "${var.project_name}-${var.environment}-persistent-nodes"
+  node_role_arn   = var.node_role_arn
+  subnet_ids      = var.private_subnet_ids
+
+  instance_types = var.persistent_node_instance_types
+  capacity_type  = "ON_DEMAND"
+  disk_size      = var.persistent_node_disk_size
+
+  scaling_config {
+    desired_size = var.persistent_node_desired_size
+    min_size     = var.persistent_node_min_size
+    max_size     = var.persistent_node_max_size
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  # Labels for node selection
+  labels = {
+    role          = "persistent"
+    workload-type = "persistent"
+    environment   = var.environment
+  }
+
+  # Taints to prevent non-database pods from scheduling
+  taint {
+    key    = "workload-type"
+    value  = "persistent"
+    effect = "NoSchedule"
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Name                                        = "${var.project_name}-${var.environment}-persistent-node-group"
+      "k8s.io/cluster-autoscaler/node-template/label/workload-type" = "persistent"
+      "k8s.io/cluster-autoscaler/node-template/taint/workload-type" = "persistent:NoSchedule"
+    }
+  )
+
+  depends_on = [aws_eks_cluster.main]
+
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
+  }
+}
+
 # EKS Addons
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name = aws_eks_cluster.main.name
@@ -256,7 +315,8 @@ resource "aws_eks_addon" "vpc_cni" {
 
   depends_on = [
     aws_eks_node_group.private,
-    aws_eks_node_group.public
+    aws_eks_node_group.public,
+    aws_eks_node_group.persistent
   ]
 }
 
@@ -268,7 +328,8 @@ resource "aws_eks_addon" "kube_proxy" {
 
   depends_on = [
     aws_eks_node_group.private,
-    aws_eks_node_group.public
+    aws_eks_node_group.public,
+    aws_eks_node_group.persistent
   ]
 }
 
@@ -280,6 +341,7 @@ resource "aws_eks_addon" "coredns" {
 
   depends_on = [
     aws_eks_node_group.private,
-    aws_eks_node_group.public
+    aws_eks_node_group.public,
+    aws_eks_node_group.persistent
   ]
 }

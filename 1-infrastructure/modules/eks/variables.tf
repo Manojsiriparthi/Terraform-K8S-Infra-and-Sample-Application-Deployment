@@ -97,3 +97,33 @@ variable "common_tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
 }
+
+variable "eks_secrets_kms_key_arn" {
+  description = "KMS key ARN for EKS secrets encryption"
+  type        = string
+}
+
+variable "persistent_node_instance_types" {
+  description = "Persistent node instance types (for database/stateful workloads)"
+  type        = list(string)
+}
+
+variable "persistent_node_desired_size" {
+  description = "Persistent node desired count"
+  type        = number
+}
+
+variable "persistent_node_min_size" {
+  description = "Persistent node minimum count"
+  type        = number
+}
+
+variable "persistent_node_max_size" {
+  description = "Persistent node maximum count"
+  type        = number
+}
+
+variable "persistent_node_disk_size" {
+  description = "Persistent node disk size in GB"
+  type        = number
+}

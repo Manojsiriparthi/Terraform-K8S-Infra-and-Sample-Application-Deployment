@@ -35,7 +35,17 @@ output "fluent_bit_role_arn" {
 output "cloudwatch_log_groups" {
   description = "CloudWatch log groups for EKS cluster"
   value = {
-    application = "/aws/eks/${local.cluster_name}/application"
-    dataplane   = "/aws/eks/${local.cluster_name}/dataplane"
+    application = aws_cloudwatch_log_group.application.name
+    dataplane   = aws_cloudwatch_log_group.dataplane.name
   }
+}
+
+output "external_dns_role_arn" {
+  description = "External DNS IAM role ARN"
+  value       = aws_iam_role.external_dns.arn
+}
+
+output "cert_manager_role_arn" {
+  description = "Cert Manager IAM role ARN"
+  value       = aws_iam_role.cert_manager.arn
 }
