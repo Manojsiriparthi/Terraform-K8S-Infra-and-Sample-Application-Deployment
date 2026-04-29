@@ -1,92 +1,89 @@
 # ============================================================================
-# EC2 BASTION MODULE - PRODUCTION GRADE SECURITY
+# EC2 BASTION — SSM SESSION MANAGER ACCESS ONLY
+# ============================================================================
+#
+# Access method: AWS Systems Manager Session Manager
+#   - No SSH key required
+#   - No port 22 open
+#   - No public IP needed
+#   - Session established via SSM agent → AWS SSM endpoint (HTTPS 443)
+#   - Full session audit trail in CloudWatch / S3
+#
+# Connect:
+#   aws ssm start-session --target <instance-id> --region us-east-1
+#
+# Security Group:
+#   - No inbound rules — SSM does not require any inbound port
+#   - Outbound 443 only — SSM agent calls AWS endpoints over HTTPS
 # ============================================================================
 
-# Get latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux_2" {
+# Latest Amazon Linux 2023 AMI — SSM agent pre-installed
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-*-x86_64"]
   }
 
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
   }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
 }
 
-# Bastion Security Group - Restricted SSH Access
+# ============================================================================
+# SECURITY GROUP — no inbound, outbound 443 only
+# ============================================================================
+
 resource "aws_security_group" "bastion" {
   name        = "${var.project_name}-${var.environment}-bastion-sg"
-  description = "Security group for bastion host - restricted SSH access"
+  description = "Bastion host — SSM only, no inbound rules required"
   vpc_id      = var.vpc_id
 
-  # SSH access from allowed CIDRs only (your office/home IP)
-  ingress {
-    description = "SSH access from allowed IPs"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_cidrs
-  }
+  # No inbound rules — SSM Session Manager does not need any inbound port
 
-  # Allow all outbound traffic (bastion needs to reach EKS API and nodes)
+  # Outbound 443 only — SSM agent communicates with AWS endpoints over HTTPS
   egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS to AWS SSM and EC2 endpoints"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # AWS endpoint IPs are dynamic; VPC endpoints can restrict this further
   }
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-bastion-sg"
-    }
-  )
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-bastion-sg"
+  })
 }
 
-# Use existing AWS key pair (created manually in AWS Console)
-data "aws_key_pair" "bastion" {
-  key_name = var.key_name
-}
+# ============================================================================
+# BASTION EC2 INSTANCE
+# Placed in a private subnet — no public IP needed for SSM access.
+# ============================================================================
 
-# Elastic IP for bastion (static IP for whitelisting)
-resource "aws_eip" "bastion" {
-  domain   = "vpc"
-  instance = aws_instance.bastion.id
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-bastion-eip"
-    }
-  )
-
-  depends_on = [aws_instance.bastion]
-}
-
-# Bastion EC2 Instance
 resource "aws_instance" "bastion" {
-  ami                    = data.aws_ami.amazon_linux_2.id
+  ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = var.instance_type
-  key_name               = data.aws_key_pair.bastion.key_name
-  subnet_id              = var.public_subnet_id
+  subnet_id              = var.private_subnet_id   # private subnet — no public IP needed
   vpc_security_group_ids = [aws_security_group.bastion.id]
   iam_instance_profile   = var.iam_instance_profile_name
 
-  # Enable IMDSv2 (prevents SSRF attacks)
+  # No key_name — SSH access disabled, SSM only
+
+  # IMDSv2 — prevents SSRF / credential-theft via metadata endpoint
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
   }
 
-  # Enable EBS encryption
   root_block_device {
     volume_type           = "gp3"
     volume_size           = 20
@@ -94,24 +91,18 @@ resource "aws_instance" "bastion" {
     delete_on_termination = true
   }
 
-  # Install SSM agent for secure access without SSH
+  # AL2023 has SSM agent pre-installed; ensure it is running
   user_data = <<-EOF
-              #!/bin/bash
-              yum update -y
-              yum install -y amazon-ssm-agent
-              systemctl enable amazon-ssm-agent
-              systemctl start amazon-ssm-agent
-              EOF
+    #!/bin/bash
+    systemctl enable amazon-ssm-agent
+    systemctl start amazon-ssm-agent
+  EOF
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-bastion"
-    }
-  )
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-bastion"
+  })
 
   lifecycle {
-    create_before_destroy = true
-    ignore_changes        = [ami, user_data]
+    ignore_changes = [ami, user_data]
   }
 }

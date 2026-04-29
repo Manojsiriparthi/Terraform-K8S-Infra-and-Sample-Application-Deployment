@@ -1,0 +1,69 @@
+# ==============================================================================
+# Grafana Override Values — Production
+# ==============================================================================
+# Usage: helm upgrade --install monitoring ./helm -f values/grafana-values.yaml
+#
+# IMPORTANT: adminPassword should be injected via CI/CD secrets, not stored here.
+# Example: --set kubePrometheusStack.kube-prometheus-stack.grafana.adminPassword=$GRAFANA_PASS
+# ==============================================================================
+
+kubePrometheusStack:
+  kube-prometheus-stack:
+    grafana:
+      # Override password via CI/CD — do NOT commit real passwords
+      adminPassword: "changeme123"
+
+      grafana.ini:
+        server:
+          root_url: "%(protocol)s://%(domain)s/grafana/"
+          serve_from_sub_path: true
+        # Disable telemetry
+        analytics:
+          check_for_updates: false
+          reporting_enabled: false
+        # Security hardening
+        security:
+          disable_gravatar: true
+          cookie_secure: false        # set true when HTTPS is enabled
+          cookie_samesite: lax
+          allow_embedding: false
+        # Logging
+        log:
+          mode: console
+          level: warn
+        # Users
+        users:
+          allow_sign_up: false
+          auto_assign_org: true
+          auto_assign_org_role: Viewer
+
+      # Persistent storage
+      persistence:
+        enabled: true
+        storageClassName: ebs-gp3
+        size: 10Gi
+        accessModes:
+          - ReadWriteOnce
+
+      # Resources
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 300m
+          memory: 512Mi
+
+      # Pre-configured datasources
+      additionalDataSources:
+        - name: Elasticsearch
+          type: elasticsearch
+          url: http://elasticsearch-master:9200
+          access: proxy
+          database: "shopease-logs-*"
+          jsonData:
+            esVersion: "8.0.0"
+            timeField: "@timestamp"
+            logMessageField: message
+            logLevelField: level
+          isDefault: false

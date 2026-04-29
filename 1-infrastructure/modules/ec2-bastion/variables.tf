@@ -13,29 +13,19 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "public_subnet_id" {
-  description = "Public subnet ID for bastion"
+variable "private_subnet_id" {
+  description = "Private subnet ID — bastion placed in private subnet, SSM handles access"
   type        = string
 }
 
 variable "instance_type" {
-  description = "Bastion instance type"
+  description = "Bastion EC2 instance type"
   type        = string
-}
-
-variable "key_name" {
-  description = "SSH key name (must exist in AWS Console)"
-  type        = string
-}
-
-variable "allowed_cidrs" {
-  description = "CIDR blocks allowed to SSH to bastion"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = "t3.micro"
 }
 
 variable "iam_instance_profile_name" {
-  description = "IAM instance profile name"
+  description = "IAM instance profile name — must have AmazonSSMManagedInstanceCore attached"
   type        = string
 }
 

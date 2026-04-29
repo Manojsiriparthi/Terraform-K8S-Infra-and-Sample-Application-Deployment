@@ -1,151 +1,137 @@
+# ============================================================================
+# NETWORK POLICIES — Fine-grained traffic control
+# ============================================================================
+# These supplement the namespace-level policies in 2-eks-addons/rbac.tf.
+# They define WHICH pods can talk to WHICH pods at the pod-selector level.
+# ============================================================================
+
 ---
-# Network Policy for Backend
-# Only allows traffic from frontend and within namespace
+# Allow frontend pods to call backend pods (within app1 namespace)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: backend-network-policy
-  namespace: application
+  name: allow-frontend-to-backend
+  namespace: app1
 spec:
   podSelector:
     matchLabels:
-      app: backend
-      tier: api
+      tier: backend
   policyTypes:
     - Ingress
-    - Egress
-  
   ingress:
-    # Allow from frontend
+    # From frontend pods in same namespace
     - from:
         - podSelector:
             matchLabels:
-              app: frontend
+              tier: frontend
       ports:
-        - protocol: TCP
-          port: 5000
-    
-    # Allow from same namespace
+        - port: 5000
+          protocol: TCP
+    # From Gateway controller (kube-system)
     - from:
         - namespaceSelector:
             matchLabels:
-              name: application
+              kubernetes.io/metadata.name: kube-system
       ports:
-        - protocol: TCP
-          port: 5000
-  
-  egress:
-    # Allow to database
-    - to:
-        - podSelector:
-            matchLabels:
-              app: postgres
-      ports:
-        - protocol: TCP
-          port: 5432
-    
-    # Allow DNS
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              name: kube-system
-        - podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-    
-    # Allow external API calls
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 443
+        - port: 5000
+          protocol: TCP
 
 ---
-# Network Policy for Database
-# Only allows traffic from backend
+# Allow backend pods to reach database (cross-namespace)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: database-network-policy
-  namespace: application
+  name: allow-backend-to-database
+  namespace: app1-database
 spec:
   podSelector:
     matchLabels:
       app: postgres
-      tier: database
   policyTypes:
     - Ingress
-    - Egress
-  
   ingress:
-    # Only allow from backend
+    # Only backend pods from app1 namespace can reach postgres
     - from:
-        - podSelector:
-            matchLabels:
-              app: backend
-      ports:
-        - protocol: TCP
-          port: 5432
-  
-  egress:
-    # Allow DNS
-    - to:
         - namespaceSelector:
             matchLabels:
-              name: kube-system
-        - podSelector:
+              app: app1
+          podSelector:
             matchLabels:
-              k8s-app: kube-dns
+              tier: backend
       ports:
-        - protocol: UDP
-          port: 53
+        - port: 5432
+          protocol: TCP
 
 ---
-# Network Policy for Frontend
-# Allows traffic from internet (via ALB)
+# Allow Prometheus to scrape backend metrics
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: frontend-network-policy
-  namespace: application
+  name: allow-prometheus-scrape-backend
+  namespace: app1
 spec:
   podSelector:
     matchLabels:
-      app: frontend
-      tier: web
+      tier: backend
   policyTypes:
     - Ingress
-    - Egress
-  
   ingress:
-    # Allow from anywhere (ALB will handle external traffic)
     - from:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 80
-  
-  egress:
-    # Allow to backend
-    - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              app: backend
+              app: monitoring
       ports:
-        - protocol: TCP
-          port: 5000
-    
-    # Allow DNS
+        - port: 5000
+          protocol: TCP
+
+---
+# Allow Prometheus to scrape postgres-exporter metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape-database
+  namespace: app1-database
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app: monitoring
+      ports:
+        - port: 9187    # postgres-exporter metrics port
+          protocol: TCP
+
+---
+# Allow backend egress to database only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-egress-policy
+  namespace: app1
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # PostgreSQL in app1-database namespace
+    # namespace label is "app: app1" only (set in 2-eks-addons/rbac.tf)
     - to:
         - namespaceSelector:
             matchLabels:
-              name: kube-system
-        - podSelector:
-            matchLabels:
-              k8s-app: kube-dns
+              app: app1
       ports:
-        - protocol: UDP
-          port: 53
+        - port: 5432
+          protocol: TCP

@@ -1,0 +1,17 @@
+{{- /*
+  Monitoring namespace with standard labels.
+  Created by the Helm chart so it's lifecycle-managed.
+*/}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespace }}
+  labels:
+    name: {{ .Values.namespace }}
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: shopease-monitoring
+    # Allow Prometheus to scrape this namespace
+    monitoring: "true"
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}

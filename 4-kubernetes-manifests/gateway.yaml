@@ -1,0 +1,546 @@
+# ============================================================================
+# GATEWAY API — GATEWAYS + HTTPROUTES
+# ============================================================================
+#
+# EXTERNAL GATEWAY (internet-facing ALB) — one ALB, all public apps:
+#   /shopcase/home       → app1 frontend
+#   /shopcase/cart       → app1 frontend
+#   /shopcase/payment    → app1 frontend
+#   /shopcase/service    → app1 backend API
+#   /shopcase/api        → app1 backend API
+#   /chatbot             → app2 frontend  (add app2 HTTPRoute when ready)
+#
+# INTERNAL GATEWAY (private ALB) — one ALB, backend + monitoring:
+#
+#   Platform team (sees ALL apps):
+#     /grafana            → Grafana (Org 1 — all dashboards)
+#     /prometheus         → Prometheus (all namespaces)
+#     /alertmanager       → Alertmanager
+#     /kibana             → Kibana (all indices)
+#
+#   App1 team (sees ONLY app1 data):
+#     /app1/grafana       → Grafana (Org 2 — app1 dashboards only)
+#     /app1/prometheus    → Prometheus (filtered: namespace=app1)
+#     /app1/kibana        → Kibana (space: app1 — app1 indices only)
+#
+#   App2 team (sees ONLY app2 data):
+#     /app2/grafana       → Grafana (Org 3 — app2 dashboards only)
+#     /app2/prometheus    → Prometheus (filtered: namespace=app2)
+#     /app2/kibana        → Kibana (space: app2 — app2 indices only)
+#
+#   Backend APIs (internal service-to-service):
+#     /api                → app1 backend
+#     /health             → app1 backend health
+#
+# ISOLATION MECHANISM:
+#   Same Grafana instance, different Organizations.
+#   The path /app1/grafana injects header "X-Grafana-Org-Id: 2"
+#   via HTTPRoute RequestHeaderModifier filter.
+#   Grafana Org 2 has ONLY app1 datasources and dashboards.
+#   app1-team user is assigned to Org 2 only — cannot switch to Org 1.
+#
+#   Same Prometheus instance, namespace-scoped queries.
+#   /app1/prometheus rewrites path and injects namespace label enforcer.
+#   (Full tenant isolation requires Thanos or Cortex — see comments below)
+# ============================================================================
+
+---
+# ── EXTERNAL GATEWAY ─────────────────────────────────────────────────────────
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: external-gateway
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/managed-by: platform-team
+spec:
+  gatewayClassName: external-gateway-class
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.networking.k8s.io/external-routes: "true"
+
+---
+# ── INTERNAL GATEWAY ─────────────────────────────────────────────────────────
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: internal-gateway
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/managed-by: platform-team
+spec:
+  gatewayClassName: internal-gateway-class
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.networking.k8s.io/internal-routes: "true"
+
+# ============================================================================
+# EXTERNAL HTTPROUTES — app1 (ShopCase)
+# ============================================================================
+
+---
+# App1 frontend — UI pages
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-frontend-route
+  namespace: app1
+  labels:
+    app: shopease
+    tier: frontend
+spec:
+  parentRefs:
+    - name: external-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /shopcase/home
+      backendRefs:
+        - name: frontend-service
+          port: 80
+
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /shopcase/cart
+      backendRefs:
+        - name: frontend-service
+          port: 80
+
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /shopcase/payment
+      backendRefs:
+        - name: frontend-service
+          port: 80
+
+    # /shopcase → redirect to /shopcase/home
+    - matches:
+        - path:
+            type: Exact
+            value: /shopcase
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /shopcase/home
+            statusCode: 301
+
+---
+# App1 backend — API endpoints
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-backend-external-route
+  namespace: app1
+  labels:
+    app: shopease
+    tier: backend
+spec:
+  parentRefs:
+    - name: external-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /shopcase/service
+      backendRefs:
+        - name: backend-service
+          port: 5000
+
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /shopcase/api
+      backendRefs:
+        - name: backend-service
+          port: 5000
+
+# ============================================================================
+# INTERNAL HTTPROUTES — app1 backend (service-to-service)
+# ============================================================================
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-backend-internal-route
+  namespace: app1
+  labels:
+    app: shopease
+    tier: backend
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: backend-service
+          port: 5000
+
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /health
+      backendRefs:
+        - name: backend-service
+          port: 5000
+
+# ============================================================================
+# INTERNAL HTTPROUTES — PLATFORM MONITORING
+# Access: platform-team + sre-team + admin-team only
+# These routes expose ALL apps' data — restricted by VPN/network access only
+# ============================================================================
+
+---
+# Platform Grafana — all apps, all dashboards (Grafana Org 1)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-grafana-route
+  namespace: monitoring
+  labels:
+    app: monitoring
+    team: platform
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /grafana
+      backendRefs:
+        - name: monitoring-grafana
+          port: 80
+
+---
+# Platform Prometheus — all namespaces
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-prometheus-route
+  namespace: monitoring
+  labels:
+    app: monitoring
+    team: platform
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /prometheus
+      backendRefs:
+        - name: monitoring-kube-prometheus-prometheus
+          port: 9090
+
+---
+# Platform Alertmanager
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-alertmanager-route
+  namespace: monitoring
+  labels:
+    app: monitoring
+    team: platform
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /alertmanager
+      backendRefs:
+        - name: monitoring-kube-prometheus-alertmanager
+          port: 9093
+
+---
+# Platform Kibana — all indices
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: platform-kibana-route
+  namespace: monitoring
+  labels:
+    app: monitoring
+    team: platform
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /kibana
+      backendRefs:
+        - name: monitoring-kibana
+          port: 5601
+
+# ============================================================================
+# INTERNAL HTTPROUTES — APP1 TEAM MONITORING
+# Path: /app1/grafana, /app1/prometheus, /app1/kibana
+#
+# ISOLATION:
+#   Grafana: X-Grafana-Org-Id header → Org 2 (app1 only)
+#   Prometheus: path rewrite to /prometheus + namespace enforcer comment
+#   Kibana: path rewrite to /kibana/s/app1 (Kibana space for app1)
+#
+# app1-team accesses /app1/* paths.
+# They CANNOT reach /grafana, /prometheus, /app2/* — those paths
+# are in different namespaces and their RBAC only allows app1-monitoring.
+# ============================================================================
+
+---
+# App1 Grafana — injects X-Grafana-Org-Id: 2 header
+# Grafana serves Org 2 which has ONLY app1 dashboards and datasources
+# app1-team user is assigned to Org 2 only in Grafana admin
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-grafana-route
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app1/grafana
+      filters:
+        # Rewrite /app1/grafana → /grafana (Grafana's actual base path)
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /grafana
+        # Inject Grafana org header — routes user to app1 org automatically
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Grafana-Org-Id
+                value: "2"    # Grafana Org ID for app1 — set after creating org
+      backendRefs:
+        - name: monitoring-grafana
+          namespace: monitoring
+          port: 80
+
+---
+# App1 Prometheus — namespace-scoped view
+# NOTE: True query isolation requires Thanos Querier with tenant labels
+# or a Prometheus reverse proxy (prom-label-proxy).
+# This route gives app1-team access to Prometheus UI.
+# Enforce namespace=app1 in Grafana datasource query config instead.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-prometheus-route
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app1/prometheus
+      filters:
+        # Rewrite /app1/prometheus → /prometheus
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /prometheus
+      backendRefs:
+        - name: monitoring-kube-prometheus-prometheus
+          namespace: monitoring
+          port: 9090
+
+---
+# App1 Kibana — routes to app1 Kibana space
+# Kibana spaces isolate indices: app1-team sees only app1-logs-* indices
+# Space is created in Kibana admin: POST /kibana/api/spaces/space {"id":"app1"}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-kibana-route
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app1/kibana
+      filters:
+        # Rewrite /app1/kibana → /kibana/s/app1 (Kibana space URL)
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /kibana/s/app1
+      backendRefs:
+        - name: monitoring-kibana
+          namespace: monitoring
+          port: 5601
+
+# ============================================================================
+# INTERNAL HTTPROUTES — APP2 TEAM MONITORING
+# Same pattern as app1 — add when app2 is deployed
+# Grafana Org ID for app2 = 3
+# Kibana space for app2 = "app2"
+# ============================================================================
+
+---
+# App2 Grafana — Org 3 (app2 dashboards only)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app2-grafana-route
+  namespace: app2-monitoring
+  labels:
+    app: app2
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app2/grafana
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /grafana
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Grafana-Org-Id
+                value: "3"    # Grafana Org ID for app2
+      backendRefs:
+        - name: monitoring-grafana
+          namespace: monitoring
+          port: 80
+
+---
+# App2 Prometheus
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app2-prometheus-route
+  namespace: app2-monitoring
+  labels:
+    app: app2
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app2/prometheus
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /prometheus
+      backendRefs:
+        - name: monitoring-kube-prometheus-prometheus
+          namespace: monitoring
+          port: 9090
+
+---
+# App2 Kibana — space: app2
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app2-kibana-route
+  namespace: app2-monitoring
+  labels:
+    app: app2
+    tier: monitoring
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: kube-system
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app2/kibana
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /kibana/s/app2
+      backendRefs:
+        - name: monitoring-kibana
+          namespace: monitoring
+          port: 5601

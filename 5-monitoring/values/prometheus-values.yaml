@@ -1,0 +1,64 @@
+# ==============================================================================
+# Prometheus Override Values — Production
+# ==============================================================================
+# Usage: helm upgrade --install monitoring ./helm -f values/prometheus-values.yaml
+#
+# These values OVERRIDE the defaults in helm/values.yaml.
+# Use this file for environment-specific Prometheus tuning.
+# ==============================================================================
+
+kubePrometheusStack:
+  kube-prometheus-stack:
+    prometheus:
+      prometheusSpec:
+        # Production retention: 30 days / 45 GB cap
+        retention: 30d
+        retentionSize: "45GB"
+
+        # Scrape interval
+        scrapeInterval: "30s"
+        evaluationInterval: "30s"
+
+        # Additional scrape configs for ShopEase backend
+        additionalScrapeConfigs:
+          - job_name: "shopease-backend"
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces:
+                  names: ["application"]
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: "true"
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $1:$2
+                target_label: __address__
+              - source_labels: [__meta_kubernetes_pod_label_app]
+                target_label: app
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+
+        # Storage
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ebs-gp3
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 50Gi
+
+        # Resources
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: 1000m
+            memory: 4Gi

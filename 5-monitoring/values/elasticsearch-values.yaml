@@ -1,0 +1,77 @@
+# ==============================================================================
+# Elasticsearch Override Values — Production
+# ==============================================================================
+# Usage: helm upgrade --install monitoring ./helm -f values/elasticsearch-values.yaml
+# ==============================================================================
+
+elasticsearch:
+  elasticsearch:
+    # 3 replicas — one per AZ for HA
+    replicas: 3
+    minimumMasterNodes: 2
+
+    clusterName: shopease-logs
+
+    imageTag: "8.5.1"
+
+    # JVM heap = half of memory limit (1g of 2g)
+    esJavaOpts: "-Xmx1g -Xms1g"
+
+    esConfig:
+      elasticsearch.yml: |
+        cluster.name: shopease-logs
+        xpack.security.enabled: false
+        xpack.monitoring.collection.enabled: true
+        # Index lifecycle management
+        xpack.ilm.enabled: true
+        # Prevent split-brain with 3 nodes
+        discovery.zen.minimum_master_nodes: 2
+        # Performance tuning
+        indices.memory.index_buffer_size: 20%
+        thread_pool.write.queue_size: 1000
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+    # 30 GB per node × 3 nodes = 90 GB total log storage
+    volumeClaimTemplate:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ebs-gp3
+      resources:
+        requests:
+          storage: 30Gi
+
+    persistence:
+      enabled: true
+
+    # Pod disruption budget — keep at least 2 nodes during rolling updates
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 2
+
+    # Hard anti-affinity — one ES pod per node
+    antiAffinity: hard
+
+    # Security context
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 1000
+
+    # Readiness probe
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    service:
+      type: ClusterIP
+
+    ingress:
+      enabled: false

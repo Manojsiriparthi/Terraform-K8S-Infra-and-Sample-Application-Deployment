@@ -1,0 +1,65 @@
+# ==============================================================================
+# Kibana Override Values — Production
+# ==============================================================================
+# Usage: helm upgrade --install monitoring ./helm -f values/kibana-values.yaml
+# ==============================================================================
+
+kibana:
+  kibana:
+    replicas: 1
+
+    imageTag: "8.5.1"
+
+    elasticsearchHosts: "http://elasticsearch-master:9200"
+
+    kibanaConfig:
+      kibana.yml: |
+        server.name: kibana
+        server.host: "0.0.0.0"
+        # Must match the ingress path
+        server.basePath: "/kibana"
+        server.rewriteBasePath: true
+        elasticsearch.hosts: ["http://elasticsearch-master:9200"]
+        xpack.security.enabled: false
+        elasticsearch.ssl.verificationMode: none
+        # Logging
+        logging.root.level: warn
+        # Performance
+        ops.interval: 5000
+
+    extraEnvs:
+      - name: NODE_OPTIONS
+        value: "--max-old-space-size=350"
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    # Health check must include basePath
+    healthCheckPath: "/kibana/api/status"
+
+    readinessProbe:
+      failureThreshold: 10
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    service:
+      type: ClusterIP
+      port: 5601
+
+    ingress:
+      enabled: false
+
+    persistence:
+      enabled: false
+
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "5601"
+      prometheus.io/path: "/kibana/api/status"

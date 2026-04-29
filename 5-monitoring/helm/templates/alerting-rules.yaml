@@ -1,0 +1,249 @@
+{{- /*
+  PrometheusRule CRD — Prometheus Operator picks this up automatically.
+  Using CRD instead of ConfigMap so rules are version-controlled,
+  validated by the operator, and hot-reloaded without pod restarts.
+*/}}
+{{- if .Values.kubePrometheusStack.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopease-alerting-rules
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: shopease-alerting-rules
+    app.kubernetes.io/part-of: shopease-monitoring
+    app.kubernetes.io/managed-by: Helm
+    # Required labels for Prometheus Operator to discover this rule
+    release: {{ .Release.Name }}
+    app: kube-prometheus-stack
+spec:
+  groups:
+
+    # --------------------------------------------------------------------------
+    # Node-level alerts
+    # --------------------------------------------------------------------------
+    - name: node.rules
+      interval: 30s
+      rules:
+
+        - alert: NodeHighCPU
+          expr: |
+            (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High CPU on {{ $labels.instance }}"
+            description: "CPU usage is {{ $value | humanize }}% (threshold: 80%)"
+            runbook_url: "https://wiki.shopease.com/runbooks/node-high-cpu"
+
+        - alert: NodeHighMemory
+          expr: |
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "High memory on {{ $labels.instance }}"
+            description: "Memory usage is {{ $value | humanize }}% (threshold: 85%)"
+            runbook_url: "https://wiki.shopease.com/runbooks/node-high-memory"
+
+        - alert: NodeDiskPressure
+          expr: |
+            (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Disk pressure on {{ $labels.instance }}"
+            description: "Disk usage is {{ $value | humanize }}% on {{ $labels.mountpoint }}"
+
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} is not ready"
+            description: "Node has been NotReady for more than 2 minutes"
+
+    # --------------------------------------------------------------------------
+    # Pod / Workload alerts
+    # --------------------------------------------------------------------------
+    - name: pod.rules
+      interval: 30s
+      rules:
+
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total[15m]) * 60 * 15 > 3
+          for: 5m
+          labels:
+            severity: critical
+            team: application
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash-looping"
+            description: "Container {{ $labels.container }} has restarted {{ $value | humanize }} times in 15 minutes"
+            runbook_url: "https://wiki.shopease.com/runbooks/pod-crash-loop"
+
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_phase{phase=~"Pending|Unknown", namespace!="kube-system"} > 0
+          for: 10m
+          labels:
+            severity: warning
+            team: application
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} stuck in {{ $labels.phase }}"
+            description: "Pod has been in {{ $labels.phase }} state for more than 10 minutes"
+
+        - alert: PodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: warning
+            team: application
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} OOM killed"
+            description: "Container {{ $labels.container }} was OOM killed. Consider increasing memory limits."
+
+        - alert: DeploymentReplicasMismatch
+          expr: |
+            kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+          for: 10m
+          labels:
+            severity: warning
+            team: application
+          annotations:
+            summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas"
+            description: "Expected {{ $labels.spec_replicas }} replicas, got {{ $labels.available_replicas }}"
+
+    # --------------------------------------------------------------------------
+    # Application-level alerts (ShopEase backend)
+    # --------------------------------------------------------------------------
+    - name: application.rules
+      interval: 30s
+      rules:
+
+        - alert: BackendHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5..", job="backend"}[5m]))
+            /
+            sum(rate(http_requests_total{job="backend"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: application
+          annotations:
+            summary: "Backend 5xx error rate above 5%"
+            description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+            runbook_url: "https://wiki.shopease.com/runbooks/backend-errors"
+
+        - alert: BackendHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{job="backend"}[5m])) by (le)
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            team: application
+          annotations:
+            summary: "Backend p95 latency above 2s"
+            description: "p95 latency is {{ $value | humanizeDuration }}"
+
+        - alert: DatabaseConnectionFailure
+          expr: up{job="postgres"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: database
+          annotations:
+            summary: "PostgreSQL is unreachable"
+            description: "Database has been down for more than 2 minutes"
+            runbook_url: "https://wiki.shopease.com/runbooks/database-down"
+
+        - alert: DatabaseHighConnections
+          expr: |
+            pg_stat_activity_count > 80
+          for: 5m
+          labels:
+            severity: warning
+            team: database
+          annotations:
+            summary: "PostgreSQL connection count is high"
+            description: "Active connections: {{ $value }} (threshold: 80)"
+
+    # --------------------------------------------------------------------------
+    # Storage alerts
+    # --------------------------------------------------------------------------
+    - name: storage.rules
+      interval: 60s
+      rules:
+
+        - alert: PersistentVolumeUsageHigh
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} usage high"
+            description: "Volume usage is {{ $value | humanize }}% (threshold: 85%)"
+
+        - alert: PersistentVolumeUsageCritical
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} almost full"
+            description: "Volume usage is {{ $value | humanize }}% — immediate action required"
+
+    # --------------------------------------------------------------------------
+    # Monitoring stack self-health
+    # --------------------------------------------------------------------------
+    - name: monitoring.rules
+      interval: 60s
+      rules:
+
+        - alert: PrometheusTargetDown
+          expr: up == 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Prometheus target {{ $labels.job }}/{{ $labels.instance }} is down"
+            description: "Target has been unreachable for more than 5 minutes"
+
+        - alert: ElasticsearchClusterRed
+          expr: |
+            elasticsearch_cluster_health_status{color="red"} == 1
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Elasticsearch cluster is RED"
+            description: "Cluster health is RED — data loss may be occurring"
+
+        - alert: ElasticsearchClusterYellow
+          expr: |
+            elasticsearch_cluster_health_status{color="yellow"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Elasticsearch cluster is YELLOW"
+            description: "Cluster health is YELLOW — some replicas are unassigned"
+{{- end }}

@@ -1,0 +1,79 @@
+{{- /*
+  Single Internal AWS ALB — path-based routing for all monitoring tools.
+
+  This Ingress joins the SAME ALB group as the backend application ingress
+  (group.name: internal-alb) so only ONE internal load balancer is created
+  for both backend API and all monitoring UIs.
+
+  Routing table:
+    /grafana        → prometheus-grafana:80
+    /prometheus     → prometheus-kube-prometheus-prometheus:9090
+    /alertmanager   → prometheus-kube-prometheus-alertmanager:9093
+    /kibana         → kibana-kibana:5601
+
+  Frontend uses a SEPARATE internet-facing ALB (not in this group).
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: monitoring-ingress
+    app.kubernetes.io/part-of: shopease-monitoring
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    {{- /* Merge base annotations from values */}}
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- /* ALB group — shares the internal ALB with backend-ingress */}}
+    alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
+    alb.ingress.kubernetes.io/group.order: {{ .Values.ingress.groupOrder | quote }}
+    {{- /* Per-path health checks */}}
+    alb.ingress.kubernetes.io/healthcheck-path: /
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+
+          {{- /* ── Grafana ─────────────────────────────────────────────── */}}
+          {{- if .Values.kubePrometheusStack.enabled }}
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-grafana
+                port:
+                  number: 80
+
+          {{- /* ── Prometheus ──────────────────────────────────────────── */}}
+          - path: /prometheus
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-kube-prometheus-prometheus
+                port:
+                  number: 9090
+
+          {{- /* ── Alertmanager ─────────────────────────────────────────── */}}
+          - path: /alertmanager
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-kube-prometheus-alertmanager
+                port:
+                  number: 9093
+          {{- end }}
+
+          {{- /* ── Kibana ───────────────────────────────────────────────── */}}
+          {{- if .Values.kibana.enabled }}
+          - path: /kibana
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-kibana
+                port:
+                  number: 5601
+          {{- end }}
+{{- end }}

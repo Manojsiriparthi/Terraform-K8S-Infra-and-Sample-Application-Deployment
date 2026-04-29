@@ -1,69 +1,11 @@
----
-# Frontend Deployment (Stateless)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: frontend
-  namespace: application
-  labels:
-    app: frontend
-    tier: web
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: frontend
-      tier: web
-  
-  template:
-    metadata:
-      labels:
-        app: frontend
-        tier: web
-    spec:
-      # Run on public nodes
-      nodeSelector:
-        role: public
-      
-      containers:
-        - name: frontend
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/shopease-frontend:latest
-          ports:
-            - containerPort: 80
-              name: http
-          
-          env:
-            - name: REACT_APP_API_URL
-              value: http://backend-service:5000
-          
-          # Resource limits
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 200m
-              memory: 512Mi
-          
-          # Liveness probe
-          livenessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          
-          # Readiness probe
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+# ============================================================================
+# FRONTEND — React + Nginx Deployment
+# ============================================================================
+# Namespace  : app1
+# Node group : general nodes
+# Replicas   : 2 (one per AZ) with HPA up to 8
+# Exposed    : via Gateway API HTTPRoute (external ALB)
+# ============================================================================
 
 ---
 # Frontend Service
@@ -71,48 +13,179 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frontend-service
-  namespace: application
+  namespace: app1
   labels:
-    app: frontend
-    tier: web
+    app: shopease
+    tier: frontend
 spec:
   type: ClusterIP
   selector:
-    app: frontend
-    tier: web
+    app: shopease
+    tier: frontend
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 80
       protocol: TCP
-      name: http
 
 ---
-# Frontend Public Ingress (ALB)
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: frontend-ingress
-  namespace: application
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/healthcheck-path: /
-    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
-    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
-    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
-    alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+  name: frontend
+  namespace: app1
   labels:
-    app: frontend
+    app: shopease
+    tier: frontend
 spec:
-  ingressClassName: alb
-  rules:
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: frontend-service
-                port:
-                  number: 80
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shopease
+      tier: frontend
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: shopease
+        tier: frontend
+        version: "1.0"
+
+    spec:
+      nodeSelector:
+        node-type: general
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: shopease
+              tier: frontend
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101        # nginx user
+        runAsGroup: 101
+        fsGroup: 101
+
+      containers:
+        - name: frontend
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/shopease-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: nginx.conf
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: frontend-nginx-config
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+
+      terminationGracePeriodSeconds: 30
+
+---
+# HPA for frontend
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: app1
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: app1
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: shopease
+      tier: frontend

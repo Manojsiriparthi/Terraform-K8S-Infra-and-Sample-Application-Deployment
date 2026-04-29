@@ -1,0 +1,108 @@
+# ============================================================================
+# SERVICEMONITOR — Prometheus scrape config for app1
+# ============================================================================
+# Deployed in app1-monitoring namespace.
+# Prometheus discovers this via namespace label: monitoring=true
+# Scrapes ONLY app1 namespace pods — app1-team sees only their metrics.
+# ============================================================================
+
+---
+# ServiceMonitor for backend
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: app1-backend-monitor
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    release: monitoring    # must match Prometheus operator label selector
+spec:
+  namespaceSelector:
+    matchNames:
+      - app1               # scrape ONLY app1 namespace
+  selector:
+    matchLabels:
+      tier: backend
+  endpoints:
+    - port: http
+      path: /health
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# ServiceMonitor for postgres-exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: app1-database-monitor
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - app1-database      # scrape ONLY app1-database namespace
+  selector:
+    matchLabels:
+      app: postgres
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# PrometheusRule — app1-specific alerting rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app1-alerts
+  namespace: app1-monitoring
+  labels:
+    app: app1
+    release: monitoring
+spec:
+  groups:
+    - name: app1.backend
+      interval: 30s
+      rules:
+        - alert: App1BackendDown
+          expr: up{namespace="app1", tier="backend"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: app1
+          annotations:
+            summary: "App1 backend pod is down"
+
+        - alert: App1HighErrorRate
+          expr: |
+            rate(http_requests_total{namespace="app1", status=~"5.."}[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            team: app1
+          annotations:
+            summary: "App1 backend error rate above 5%"
+
+    - name: app1.database
+      interval: 60s
+      rules:
+        - alert: App1DatabaseDown
+          expr: up{namespace="app1-database"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: app1
+          annotations:
+            summary: "App1 PostgreSQL is unreachable"
+
+        - alert: App1DatabaseHighConnections
+          expr: pg_stat_activity_count{namespace="app1-database"} > 150
+          for: 5m
+          labels:
+            severity: warning
+            team: app1
+          annotations:
+            summary: "App1 PostgreSQL connection count is high"

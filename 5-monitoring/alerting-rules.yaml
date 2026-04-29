@@ -1,0 +1,102 @@
+# ==============================================================================
+# Alerting Rules — Reference Copy
+# ==============================================================================
+# NOTE: The LIVE rules are managed by the Helm chart template at:
+#   6-monitoring/helm/templates/alerting-rules.yaml
+#
+# This file is a standalone reference / documentation copy.
+# To apply rules outside of Helm (e.g., for testing):
+#   kubectl apply -f alerting-rules.yaml
+# ==============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopease-alerting-rules
+  namespace: monitoring
+  labels:
+    release: monitoring
+    app: kube-prometheus-stack
+spec:
+  groups:
+
+    - name: node.rules
+      interval: 30s
+      rules:
+        - alert: NodeHighCPU
+          expr: (100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.instance }}"
+            description: "CPU usage is {{ $value | humanize }}%"
+
+        - alert: NodeHighMemory
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory on {{ $labels.instance }}"
+            description: "Memory usage is {{ $value | humanize }}%"
+
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.node }} is not ready"
+
+    - name: pod.rules
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total[15m]) * 60 * 15 > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash-looping"
+
+        - alert: PodOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} OOM killed"
+
+    - name: application.rules
+      interval: 30s
+      rules:
+        - alert: BackendHighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5..", job="backend"}[5m]))
+            / sum(rate(http_requests_total{job="backend"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend 5xx error rate above 5%"
+
+        - alert: DatabaseConnectionFailure
+          expr: up{job="postgres"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL is unreachable"
+
+    - name: storage.rules
+      interval: 60s
+      rules:
+        - alert: PersistentVolumeUsageHigh
+          expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ $labels.persistentvolumeclaim }} usage high"
+            description: "Volume usage is {{ $value | humanize }}%"

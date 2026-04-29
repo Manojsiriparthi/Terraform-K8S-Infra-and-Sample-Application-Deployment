@@ -1,42 +1,127 @@
+# ============================================================================
+# BACKEND — Flask API Deployment
+# ============================================================================
+# Namespace  : app1
+# Node group : general nodes (no taint)
+# Replicas   : 3 (one per AZ) with HPA up to 10
+# Database   : connects to postgres-service.app1-database.svc.cluster.local
+# Exposed    : ClusterIP only — accessed via Gateway API HTTPRoute (internal)
+# ============================================================================
+
 ---
-# Backend Deployment (Stateless)
+# Backend Service — ClusterIP, not exposed externally
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: app1
+  labels:
+    app: shopease
+    tier: backend
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "5000"
+    prometheus.io/path: "/health"
+spec:
+  type: ClusterIP
+  selector:
+    app: shopease
+    tier: backend
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000
+      protocol: TCP
+
+---
+# Backend Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
-  namespace: application
+  namespace: app1
   labels:
-    app: backend
-    tier: api
+    app: shopease
+    tier: backend
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
-      app: backend
-      tier: api
-  
+      app: shopease
+      tier: backend
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0      # zero-downtime rolling update
+
   template:
     metadata:
       labels:
-        app: backend
-        tier: api
+        app: shopease
+        tier: backend
+        version: "1.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/health"
+
     spec:
-      # Run on private nodes
+      # ── Schedule on general nodes ─────────────────────────────────────────
       nodeSelector:
-        role: private
-      
+        node-type: general
+
+      # ── Spread across AZs ────────────────────────────────────────────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: shopease
+              tier: backend
+
+      # ── Security context ──────────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Wait for database to be ready ─────────────────────────────────────
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres-service.app1-database.svc.cluster.local 5432; do
+                echo "Waiting for PostgreSQL..."
+                sleep 3
+              done
+              echo "PostgreSQL is ready"
+
       containers:
         - name: backend
           image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/shopease-backend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
               name: http
-          
+
           env:
             - name: DATABASE_HOST
-              value: postgres-service
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: DATABASE_HOST
             - name: DATABASE_PORT
-              value: "5432"
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: DATABASE_PORT
             - name: DATABASE_NAME
               valueFrom:
                 secretKeyRef:
@@ -52,8 +137,12 @@ spec:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_PASSWORD
-          
-          # Resource limits
+            - name: FLASK_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: FLASK_ENV
+
           resources:
             requests:
               cpu: 250m
@@ -61,8 +150,7 @@ spec:
             limits:
               cpu: 500m
               memory: 1Gi
-          
-          # Liveness probe
+
           livenessProbe:
             httpGet:
               path: /health
@@ -71,8 +159,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-          
-          # Readiness probe
+
           readinessProbe:
             httpGet:
               path: /health
@@ -81,57 +168,90 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+            successThreshold: 1
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12   # 60s total startup time
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      terminationGracePeriodSeconds: 30
 
 ---
-# Backend Service (Internal)
-apiVersion: v1
-kind: Service
+# HorizontalPodAutoscaler — scale on CPU + memory
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
 metadata:
-  name: backend-service
-  namespace: application
+  name: backend-hpa
+  namespace: app1
   labels:
-    app: backend
-    tier: api
+    app: shopease
+    tier: backend
 spec:
-  type: ClusterIP
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # wait 5 min before scaling down
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0    # scale up immediately
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+      selectPolicy: Max
+
+---
+# PodDisruptionBudget — keep at least 2 backend pods during disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: app1
+spec:
+  minAvailable: 2
   selector:
-    app: backend
-    tier: api
-  ports:
-    - port: 5000
-      targetPort: 5000
-      protocol: TCP
-      name: http
-
----
-# Backend Internal Ingress (ALB) - Shared with Monitoring
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: backend-ingress
-  namespace: application
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internal
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/group.name: backend-monitoring  # Share ALB with monitoring
-    alb.ingress.kubernetes.io/group.order: '1'  # Backend routes evaluated first
-    alb.ingress.kubernetes.io/healthcheck-path: /health
-    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
-    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
-    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
-    alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-  labels:
-    app: backend
-spec:
-  ingressClassName: alb
-  rules:
-    - http:
-        paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: backend-service
-                port:
-                  number: 5000
+    matchLabels:
+      app: shopease
+      tier: backend

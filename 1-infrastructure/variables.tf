@@ -47,21 +47,21 @@ variable "vpc_cidr" {
 }
 
 variable "availability_zones" {
-  description = "Availability zones"
+  description = "Availability zones — must have one per AZ for HA (3 for production)"
   type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
+  default     = ["us-east-1a", "us-east-1b", "us-east-1c"]
 }
 
 variable "public_subnet_cidrs" {
-  description = "Public subnet CIDR blocks"
+  description = "Public subnet CIDR blocks — one per AZ"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
 }
 
 variable "private_subnet_cidrs" {
-  description = "Private subnet CIDR blocks"
+  description = "Private subnet CIDR blocks — one per AZ"
   type        = list(string)
-  default     = ["10.0.10.0/24", "10.0.20.0/24"]
+  default     = ["10.2.10.0/24", "10.2.20.0/24", "10.2.30.0/24"]
 }
 
 # ============================================================================
@@ -69,22 +69,12 @@ variable "private_subnet_cidrs" {
 # ============================================================================
 
 variable "bastion_instance_type" {
-  description = "Bastion instance type"
+  description = "Bastion EC2 instance type"
   type        = string
   default     = "t3.micro"
 }
 
-variable "bastion_key_name" {
-  description = "SSH key name for bastion (must exist in AWS Console)"
-  type        = string
-  default     = "terraform"
-}
-
-variable "bastion_allowed_cidrs" {
-  description = "CIDR blocks allowed to SSH to bastion (restrict to your IP for production)"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
+# No key_name or allowed_cidrs — access is via SSM Session Manager only
 
 # ============================================================================
 # EKS VARIABLES
@@ -93,7 +83,7 @@ variable "bastion_allowed_cidrs" {
 variable "cluster_version" {
   description = "EKS cluster version"
   type        = string
-  default     = "1.28"
+  default     = "1.32"
 }
 
 variable "enabled_cluster_log_types" {
@@ -102,84 +92,100 @@ variable "enabled_cluster_log_types" {
   default     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 }
 
-variable "private_node_instance_types" {
-  description = "Private node instance types"
-  type        = list(string)
-  default     = ["t3.medium"]
-}
-
-variable "private_node_desired_size" {
-  description = "Private node desired count"
-  type        = number
-  default     = 2
-}
-
-variable "private_node_min_size" {
-  description = "Private node minimum count"
-  type        = number
-  default     = 1
-}
-
-variable "private_node_max_size" {
-  description = "Private node maximum count"
-  type        = number
-  default     = 4
-}
-
-variable "public_node_instance_types" {
-  description = "Public node instance types"
-  type        = list(string)
-  default     = ["t3.small"]
-}
-
-variable "public_node_desired_size" {
-  description = "Public node desired count"
-  type        = number
-  default     = 1
-}
-
-variable "public_node_min_size" {
-  description = "Public node minimum count"
-  type        = number
-  default     = 1
-}
-
-variable "public_node_max_size" {
-  description = "Public node maximum count"
-  type        = number
-  default     = 2
-}
-
 # ============================================================================
-# PERSISTENT NODE GROUP VARIABLES (for stateful workloads)
+# GENERAL NODE GROUP — application workloads (no taint)
 # ============================================================================
 
-variable "persistent_node_instance_types" {
-  description = "Persistent node instance types (for database/stateful workloads)"
+variable "general_node_instance_types" {
+  description = "Instance types for general application nodes"
   type        = list(string)
-  default     = ["t3.xlarge"]
+  default     = ["t3.large"]
 }
 
-variable "persistent_node_desired_size" {
-  description = "Persistent node desired count"
+variable "general_node_desired_size" {
+  description = "Desired number of general nodes — spread across all AZs"
   type        = number
   default     = 3
 }
 
-variable "persistent_node_min_size" {
-  description = "Persistent node minimum count"
+variable "general_node_min_size" {
+  description = "Minimum number of general nodes"
   type        = number
   default     = 3
 }
 
-variable "persistent_node_max_size" {
-  description = "Persistent node maximum count"
+variable "general_node_max_size" {
+  description = "Maximum number of general nodes"
+  type        = number
+  default     = 9
+}
+
+# ============================================================================
+# DATABASE NODE GROUP — taint: workload=database:NoSchedule
+# Only pods with matching toleration schedule here.
+# ============================================================================
+
+variable "database_node_instance_types" {
+  description = "Instance types for database nodes (memory-optimised recommended)"
+  type        = list(string)
+  default     = ["r6i.xlarge"]
+}
+
+variable "database_node_desired_size" {
+  description = "Desired number of database nodes — one per AZ"
+  type        = number
+  default     = 3
+}
+
+variable "database_node_min_size" {
+  description = "Minimum number of database nodes"
+  type        = number
+  default     = 3
+}
+
+variable "database_node_max_size" {
+  description = "Maximum number of database nodes"
   type        = number
   default     = 6
 }
 
-variable "persistent_node_disk_size" {
-  description = "Persistent node disk size in GB"
+variable "database_node_disk_size" {
+  description = "Root EBS volume size in GB for database nodes"
+  type        = number
+  default     = 100
+}
+
+# ============================================================================
+# GPU NODE GROUP — taint: workload=gpu:NoSchedule
+# Only AI/ML pods with matching toleration schedule here.
+# ============================================================================
+
+variable "gpu_node_instance_types" {
+  description = "Instance types for GPU nodes (g4dn / p3 family)"
+  type        = list(string)
+  default     = ["g4dn.xlarge"]
+}
+
+variable "gpu_node_desired_size" {
+  description = "Desired number of GPU nodes"
+  type        = number
+  default     = 1
+}
+
+variable "gpu_node_min_size" {
+  description = "Minimum GPU nodes (0 = scale to zero when idle)"
+  type        = number
+  default     = 0
+}
+
+variable "gpu_node_max_size" {
+  description = "Maximum number of GPU nodes"
+  type        = number
+  default     = 3
+}
+
+variable "gpu_node_disk_size" {
+  description = "Root EBS volume size in GB for GPU nodes"
   type        = number
   default     = 100
 }

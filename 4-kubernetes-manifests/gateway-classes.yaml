@@ -1,0 +1,76 @@
+# ============================================================================
+# GATEWAY API — GATEWAYCLASS
+# ============================================================================
+# Gateway API is the modern replacement for Ingress.
+# AWS Load Balancer Controller supports Gateway API natively.
+#
+# Two GatewayClasses:
+#   external-gateway — internet-facing ALB (public apps)
+#   internal-gateway — internal ALB (backend APIs + monitoring)
+#
+# Apply this FIRST before any Gateway or HTTPRoute resources.
+# ============================================================================
+
+---
+# External GatewayClass — internet-facing ALB
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: external-gateway-class
+  labels:
+    app.kubernetes.io/managed-by: aws-load-balancer-controller
+spec:
+  controllerName: gateway.k8s.aws/alb
+  parametersRef:
+    group: gateway.k8s.aws
+    kind: AlbConfig
+    name: external-alb-config
+    namespace: kube-system
+
+---
+# Internal GatewayClass — private ALB
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: internal-gateway-class
+  labels:
+    app.kubernetes.io/managed-by: aws-load-balancer-controller
+spec:
+  controllerName: gateway.k8s.aws/alb
+  parametersRef:
+    group: gateway.k8s.aws
+    kind: AlbConfig
+    name: internal-alb-config
+    namespace: kube-system
+
+---
+# AlbConfig for external ALB
+apiVersion: gateway.k8s.aws/v1beta1
+kind: AlbConfig
+metadata:
+  name: external-alb-config
+  namespace: kube-system
+spec:
+  scheme: internet-facing
+  ipAddressType: ipv4
+  loadBalancerAttributes:
+    - key: idle_timeout.timeout_seconds
+      value: "60"
+    - key: routing.http2.enabled
+      value: "true"
+
+---
+# AlbConfig for internal ALB
+apiVersion: gateway.k8s.aws/v1beta1
+kind: AlbConfig
+metadata:
+  name: internal-alb-config
+  namespace: kube-system
+spec:
+  scheme: internal
+  ipAddressType: ipv4
+  loadBalancerAttributes:
+    - key: idle_timeout.timeout_seconds
+      value: "60"
+    - key: routing.http2.enabled
+      value: "true"

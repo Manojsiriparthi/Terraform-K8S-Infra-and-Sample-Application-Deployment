@@ -1,31 +1,30 @@
 terraform {
-  required_version = ">= 1.0"
-  
+  required_version = ">= 1.5"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.4"
-    }
   }
 
-  # Uncomment for remote state
+  # Uncomment to enable remote state (recommended for production)
   # backend "s3" {
   #   bucket         = "shopease-terraform-state"
-  #   key            = "infrastructure/terraform.tfstate"
+  #   key            = "1-infrastructure/terraform.tfstate"
   #   region         = "us-east-1"
   #   encrypt        = true
-  #   dynamodb_table = "terraform-state-lock"
+  #   dynamodb_table = "shopease-terraform-state-lock"
   # }
 }
 
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = {
+      ManagedBy = "Terraform"
+      Layer     = "1-infrastructure"
+    }
+  }
 }

@@ -1,0 +1,44 @@
+apiVersion: v2
+name: shopease-monitoring
+description: |
+  Production monitoring stack for ShopEase.
+  Installs: kube-prometheus-stack (Prometheus + Grafana + Alertmanager),
+  Elasticsearch, and Kibana behind a single internal AWS ALB
+  using path-based routing shared with the backend application.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - monitoring
+  - prometheus
+  - grafana
+  - alertmanager
+  - elasticsearch
+  - kibana
+
+maintainers:
+  - name: DevOps Team
+    email: devops@shopease.com
+
+# ============================================================================
+# Sub-chart dependencies (pinned versions for production stability)
+# ============================================================================
+dependencies:
+  # Prometheus + Grafana + Alertmanager
+  - name: kube-prometheus-stack
+    version: "58.3.3"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: kubePrometheusStack.enabled
+
+  # Elasticsearch
+  - name: elasticsearch
+    version: "8.5.1"
+    repository: https://helm.elastic.co
+    condition: elasticsearch.enabled
+
+  # Kibana
+  - name: kibana
+    version: "8.5.1"
+    repository: https://helm.elastic.co
+    condition: kibana.enabled

@@ -19,30 +19,29 @@ availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
 public_subnet_cidrs  = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
 private_subnet_cidrs = ["10.2.10.0/24", "10.2.20.0/24", "10.2.30.0/24"]
 
-# Bastion Configuration
+# Bastion Configuration — access via SSM Session Manager (no SSH key needed)
 bastion_instance_type = "t3.micro"
-bastion_key_name      = "terraform"  # Must exist in AWS Console (EC2 → Key Pairs)
-bastion_allowed_cidrs = ["0.0.0.0/0"]  # PRODUCTION: Restrict to your office/VPN IP before deployment
 
 # EKS Configuration
 cluster_version           = "1.32"
 enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
-# Private Node Group (Application Workloads)
-private_node_instance_types = ["t3.large"]  # Upgraded for production
-private_node_desired_size   = 3  # One per AZ
-private_node_min_size       = 3
-private_node_max_size       = 9
+# General Node Group (Application Workloads — no taint)
+general_node_instance_types = ["t3.large"]
+general_node_desired_size   = 3   # one per AZ
+general_node_min_size       = 3
+general_node_max_size       = 9
 
-# Public Node Group (Ingress/Load Balancers)
-public_node_instance_types = ["t3.medium"]  # Upgraded for production
-public_node_desired_size   = 2
-public_node_min_size       = 2
-public_node_max_size       = 4
+# Database Node Group (taint: workload=database:NoSchedule)
+database_node_instance_types = ["r6i.xlarge"]  # memory-optimised for databases
+database_node_desired_size   = 3               # one per AZ
+database_node_min_size       = 3
+database_node_max_size       = 6
+database_node_disk_size      = 100
 
-# Persistent Node Group (Database/Stateful Workloads)
-persistent_node_instance_types = ["t3.xlarge"]  # Dedicated for database
-persistent_node_desired_size   = 3  # One per AZ for HA
-persistent_node_min_size       = 3
-persistent_node_max_size       = 6
-persistent_node_disk_size      = 100  # Larger disk for database nodes
+# GPU Node Group (taint: workload=gpu:NoSchedule)
+gpu_node_instance_types = ["g4dn.xlarge"]  # NVIDIA T4 GPU
+gpu_node_desired_size   = 1
+gpu_node_min_size       = 0   # scale to zero when idle
+gpu_node_max_size       = 3
+gpu_node_disk_size      = 100

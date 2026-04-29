@@ -1,140 +1,22 @@
 # ============================================================================
-# EKS MODULE - PRODUCTION GRADE SECURITY
+# EKS MODULE - PRODUCTION GRADE
+# ============================================================================
+#
+# Security Group:
+#   EKS automatically creates and manages the cluster security group.
+#   It handles all control-plane <-> node and node <-> node traffic.
+#   No custom SGs or launch templates needed.
+#
+# Node Groups:
+#   1. general  — application workloads, no taint
+#   2. database — only database pods (taint + label)
+#   3. gpu      — only AI/ML pods (taint + label)
 # ============================================================================
 
-# EKS Cluster Security Group
-resource "aws_security_group" "eks_cluster" {
-  name        = "${var.project_name}-${var.environment}-eks-cluster-sg"
-  description = "Security group for EKS cluster control plane"
-  vpc_id      = var.vpc_id
+# ============================================================================
+# EKS CLUSTER
+# ============================================================================
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-eks-cluster-sg"
-    }
-  )
-}
-
-# Cluster SG Rule: Allow HTTPS from nodes
-resource "aws_security_group_rule" "cluster_ingress_nodes_https" {
-  type                     = "ingress"
-  description              = "HTTPS from worker nodes"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_cluster.id
-  source_security_group_id = aws_security_group.eks_nodes.id
-}
-
-# Cluster SG Rule: Allow all outbound
-resource "aws_security_group_rule" "cluster_egress_all" {
-  type              = "egress"
-  description       = "Allow all outbound"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.eks_cluster.id
-}
-
-# EKS Node Security Group - Production Grade
-resource "aws_security_group" "eks_nodes" {
-  name        = "${var.project_name}-${var.environment}-eks-nodes-sg"
-  description = "Security group for EKS worker nodes - production grade"
-  vpc_id      = var.vpc_id
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name                                        = "${var.project_name}-${var.environment}-eks-nodes-sg"
-      "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-    }
-  )
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# Node SG Rule: Node to node communication
-resource "aws_security_group_rule" "nodes_ingress_self" {
-  type              = "ingress"
-  description       = "Node to node communication"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  security_group_id = aws_security_group.eks_nodes.id
-  self              = true
-}
-
-# Node SG Rule: Cluster API to node
-resource "aws_security_group_rule" "nodes_ingress_cluster_https" {
-  type                     = "ingress"
-  description              = "Cluster API to node"
-  from_port                = 443
-  to_port                  = 443
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_nodes.id
-  source_security_group_id = aws_security_group.eks_cluster.id
-}
-
-# Node SG Rule: Cluster to node kubelet
-resource "aws_security_group_rule" "nodes_ingress_cluster_kubelet" {
-  type                     = "ingress"
-  description              = "Cluster to node kubelet"
-  from_port                = 10250
-  to_port                  = 10250
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.eks_nodes.id
-  source_security_group_id = aws_security_group.eks_cluster.id
-}
-
-# Node SG Rule: CoreDNS TCP
-resource "aws_security_group_rule" "nodes_ingress_coredns_tcp" {
-  type              = "ingress"
-  description       = "CoreDNS TCP"
-  from_port         = 53
-  to_port           = 53
-  protocol          = "tcp"
-  security_group_id = aws_security_group.eks_nodes.id
-  self              = true
-}
-
-# Node SG Rule: CoreDNS UDP
-resource "aws_security_group_rule" "nodes_ingress_coredns_udp" {
-  type              = "ingress"
-  description       = "CoreDNS UDP"
-  from_port         = 53
-  to_port           = 53
-  protocol          = "udp"
-  security_group_id = aws_security_group.eks_nodes.id
-  self              = true
-}
-
-# Node SG Rule: NodePort services from VPC only
-resource "aws_security_group_rule" "nodes_ingress_nodeport" {
-  type              = "ingress"
-  description       = "NodePort services from VPC"
-  from_port         = 30000
-  to_port           = 32767
-  protocol          = "tcp"
-  cidr_blocks       = [var.vpc_cidr]
-  security_group_id = aws_security_group.eks_nodes.id
-}
-
-# Node SG Rule: Allow all outbound
-resource "aws_security_group_rule" "nodes_egress_all" {
-  type              = "egress"
-  description       = "Allow all outbound"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.eks_nodes.id
-}
-
-# EKS Cluster
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = var.cluster_role_arn
@@ -142,13 +24,13 @@ resource "aws_eks_cluster" "main" {
 
   vpc_config {
     subnet_ids              = concat(var.private_subnet_ids, var.public_subnet_ids)
-    endpoint_private_access = true
-    endpoint_public_access  = true
-    public_access_cidrs     = ["0.0.0.0/0"]  # PRODUCTION: Restrict to your office/VPN IP
-    security_group_ids      = [aws_security_group.eks_cluster.id]
+    endpoint_private_access = true            # nodes talk to API server privately inside VPC
+    endpoint_public_access  = true            # kubectl access from bastion / CI-CD
+    public_access_cidrs     = ["0.0.0.0/0"]  # PRODUCTION: restrict to your VPN/office CIDR
+    # security_group_ids not set — EKS creates and manages the cluster SG automatically
   }
 
-  # Enable secrets encryption at rest
+  # Encrypt all Kubernetes Secrets at rest in etcd
   encryption_config {
     provider {
       key_arn = var.eks_secrets_kms_key_arn
@@ -156,57 +38,59 @@ resource "aws_eks_cluster" "main" {
     resources = ["secrets"]
   }
 
-  enabled_cluster_log_types = var.enabled_cluster_log_types
+  enabled_cluster_log_types = var.enabled_cluster_log_types  # full control plane audit trail in CloudWatch
 
   access_config {
-    authentication_mode                         = "CONFIG_MAP"
+    authentication_mode                         = "API_AND_CONFIG_MAP"
     bootstrap_cluster_creator_admin_permissions = true
   }
 
   tags = var.common_tags
-
-  depends_on = [
-    aws_security_group.eks_cluster,
-    aws_security_group.eks_nodes
-  ]
 
   lifecycle {
     ignore_changes = [access_config[0].bootstrap_cluster_creator_admin_permissions]
   }
 }
 
-# Private Node Group (for application workloads)
-resource "aws_eks_node_group" "private" {
+# ============================================================================
+# NODE GROUP 1 — GENERAL
+#
+# Purpose : general application workloads
+# Taint   : none — accepts all pods by default
+# Label   : node-type=general
+# Subnets : all 3 private subnets → one node per AZ automatically
+# ============================================================================
+
+resource "aws_eks_node_group" "general" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-${var.environment}-private-nodes"
+  node_group_name = "${var.project_name}-${var.environment}-general-nodes"
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.private_subnet_ids
 
-  instance_types = var.private_node_instance_types
+  instance_types = var.general_node_instance_types
   capacity_type  = "ON_DEMAND"
-  disk_size      = 50
+  disk_size      = 50  # GB — encrypted by default on EKS managed nodes
 
   scaling_config {
-    desired_size = var.private_node_desired_size
-    min_size     = var.private_node_min_size
-    max_size     = var.private_node_max_size
+    desired_size = var.general_node_desired_size
+    min_size     = var.general_node_min_size
+    max_size     = var.general_node_max_size
   }
 
   update_config {
-    max_unavailable = 1
+    max_unavailable_percentage = 33  # rolling update — max 1/3 unavailable at a time
   }
 
   labels = {
-    role        = "private"
+    node-type   = "general"
     environment = var.environment
   }
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-private-node-group"
-    }
-  )
+  # No taints — general nodes accept all pods
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-general-nodes"
+  })
 
   depends_on = [aws_eks_cluster.main]
 
@@ -215,89 +99,52 @@ resource "aws_eks_node_group" "private" {
   }
 }
 
-# Public Node Group (for load balancers and ingress)
-resource "aws_eks_node_group" "public" {
+# ============================================================================
+# NODE GROUP 2 — DATABASE
+#
+# Purpose : stateful / database workloads only
+# Taint   : workload=database:NoSchedule
+#           → only pods with this toleration can schedule here
+# Label   : node-type=database
+#           → use nodeSelector: node-type: database in pod spec
+# Subnets : all 3 private subnets → one node per AZ automatically
+# ============================================================================
+
+resource "aws_eks_node_group" "database" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-${var.environment}-public-nodes"
-  node_role_arn   = var.node_role_arn
-  subnet_ids      = var.public_subnet_ids
-
-  instance_types = var.public_node_instance_types
-  capacity_type  = "ON_DEMAND"
-  disk_size      = 30
-
-  scaling_config {
-    desired_size = var.public_node_desired_size
-    min_size     = var.public_node_min_size
-    max_size     = var.public_node_max_size
-  }
-
-  update_config {
-    max_unavailable = 1
-  }
-
-  labels = {
-    role        = "public"
-    environment = var.environment
-  }
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name = "${var.project_name}-${var.environment}-public-node-group"
-    }
-  )
-
-  depends_on = [aws_eks_cluster.main]
-
-  lifecycle {
-    ignore_changes = [scaling_config[0].desired_size]
-  }
-}
-
-# Persistent Node Group (for database and stateful workloads)
-resource "aws_eks_node_group" "persistent" {
-  cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-${var.environment}-persistent-nodes"
+  node_group_name = "${var.project_name}-${var.environment}-database-nodes"
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.private_subnet_ids
 
-  instance_types = var.persistent_node_instance_types
+  instance_types = var.database_node_instance_types
   capacity_type  = "ON_DEMAND"
-  disk_size      = var.persistent_node_disk_size
+  disk_size      = var.database_node_disk_size  # larger disk for database storage
 
   scaling_config {
-    desired_size = var.persistent_node_desired_size
-    min_size     = var.persistent_node_min_size
-    max_size     = var.persistent_node_max_size
+    desired_size = var.database_node_desired_size
+    min_size     = var.database_node_min_size
+    max_size     = var.database_node_max_size
   }
 
   update_config {
-    max_unavailable = 1
+    max_unavailable = 1  # conservative — never take down more than 1 DB node at a time
   }
 
-  # Labels for node selection
   labels = {
-    role          = "persistent"
-    workload-type = "persistent"
-    environment   = var.environment
+    node-type   = "database"
+    environment = var.environment
   }
 
-  # Taints to prevent non-database pods from scheduling
+  # Only pods with toleration key=workload, value=database will schedule here
   taint {
-    key    = "workload-type"
-    value  = "persistent"
-    effect = "NoSchedule"
+    key    = "workload"
+    value  = "database"
+    effect = "NO_SCHEDULE"
   }
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name                                        = "${var.project_name}-${var.environment}-persistent-node-group"
-      "k8s.io/cluster-autoscaler/node-template/label/workload-type" = "persistent"
-      "k8s.io/cluster-autoscaler/node-template/taint/workload-type" = "persistent:NoSchedule"
-    }
-  )
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-database-nodes"
+  })
 
   depends_on = [aws_eks_cluster.main]
 
@@ -306,42 +153,60 @@ resource "aws_eks_node_group" "persistent" {
   }
 }
 
-# EKS Addons
-resource "aws_eks_addon" "vpc_cni" {
-  cluster_name = aws_eks_cluster.main.name
-  addon_name   = "vpc-cni"
+# ============================================================================
+# NODE GROUP 3 — GPU / AI-ML
+#
+# Purpose : AI/ML workloads only
+# Taint   : workload=gpu:NoSchedule
+#           → only pods with this toleration can schedule here
+# Label   : node-type=gpu
+#           → use nodeSelector: node-type: gpu in pod spec
+# Subnets : all 3 private subnets → spread across AZs
+# min=0   : scales to zero when no GPU jobs are running (cost saving)
+# ============================================================================
 
-  tags = var.common_tags
+resource "aws_eks_node_group" "gpu" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "${var.project_name}-${var.environment}-gpu-nodes"
+  node_role_arn   = var.node_role_arn
+  subnet_ids      = var.private_subnet_ids
 
-  depends_on = [
-    aws_eks_node_group.private,
-    aws_eks_node_group.public,
-    aws_eks_node_group.persistent
-  ]
+  instance_types = var.gpu_node_instance_types
+  capacity_type  = "ON_DEMAND"
+  disk_size      = var.gpu_node_disk_size  # larger disk for model weights and CUDA libraries
+
+  scaling_config {
+    desired_size = var.gpu_node_desired_size
+    min_size     = var.gpu_node_min_size  # 0 = scale to zero when idle
+    max_size     = var.gpu_node_max_size
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  labels = {
+    node-type                       = "gpu"
+    environment                     = var.environment
+    "nvidia.com/gpu"                = "true"
+    "k8s.amazonaws.com/accelerator" = "nvidia-tesla"
+  }
+
+  # Only pods with toleration key=workload, value=gpu will schedule here
+  taint {
+    key    = "workload"
+    value  = "gpu"
+    effect = "NO_SCHEDULE"
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-${var.environment}-gpu-nodes"
+  })
+
+  depends_on = [aws_eks_cluster.main]
+
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
+  }
 }
 
-resource "aws_eks_addon" "kube_proxy" {
-  cluster_name = aws_eks_cluster.main.name
-  addon_name   = "kube-proxy"
-
-  tags = var.common_tags
-
-  depends_on = [
-    aws_eks_node_group.private,
-    aws_eks_node_group.public,
-    aws_eks_node_group.persistent
-  ]
-}
-
-resource "aws_eks_addon" "coredns" {
-  cluster_name = aws_eks_cluster.main.name
-  addon_name   = "coredns"
-
-  tags = var.common_tags
-
-  depends_on = [
-    aws_eks_node_group.private,
-    aws_eks_node_group.public,
-    aws_eks_node_group.persistent
-  ]
-}

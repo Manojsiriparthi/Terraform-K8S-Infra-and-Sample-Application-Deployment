@@ -1,0 +1,427 @@
+# ==============================================================================
+# ShopEase Monitoring Stack - Master Values
+# ==============================================================================
+# ALB Strategy:
+#   - Internal ALB  (group: internal-alb) → Backend /api + Monitoring tools
+#   - External ALB  (standalone)          → Frontend / (internet-facing)
+#
+# All monitoring UIs are served from the SAME internal ALB as the backend:
+#   http://<internal-alb>/grafana
+#   http://<internal-alb>/prometheus
+#   http://<internal-alb>/alertmanager
+#   http://<internal-alb>/kibana
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Namespace
+# ------------------------------------------------------------------------------
+namespace: monitoring
+
+# ------------------------------------------------------------------------------
+# Ingress — Single Internal ALB shared with backend
+# ------------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: alb
+  # Must match the group.name used in backend-ingress (backend.yaml)
+  groupName: internal-alb
+  # Monitoring routes evaluated after backend (order: 1)
+  groupOrder: "2"
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/success-codes: "200-399"
+    # Connection settings
+    alb.ingress.kubernetes.io/load-balancer-attributes: >-
+      idle_timeout.timeout_seconds=60,
+      routing.http2.enabled=true,
+      access_logs.s3.enabled=false
+
+# ------------------------------------------------------------------------------
+# kube-prometheus-stack  (Prometheus + Grafana + Alertmanager)
+# Ref: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+# ------------------------------------------------------------------------------
+kubePrometheusStack:
+  enabled: true
+
+  # Values passed directly to the kube-prometheus-stack sub-chart
+  # (key must match the sub-chart name in Chart.yaml dependencies)
+  kube-prometheus-stack:
+
+    # --------------------------------------------------------------------------
+    # Prometheus
+    # --------------------------------------------------------------------------
+    prometheus:
+      prometheusSpec:
+        # Data retention
+        retention: 30d
+        retentionSize: "45GB"
+
+        # Sub-path routing — must match ingress path
+        externalUrl: "http://placeholder/prometheus"
+        routePrefix: /prometheus
+
+        # Scrape all ServiceMonitors across namespaces
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+
+        # Persistent storage on EBS gp3
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ebs-gp3
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 50Gi
+
+        # Resource limits (sized for t3.large private nodes)
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: 1000m
+            memory: 4Gi
+
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          fsGroup: 65534
+
+        # Topology spread for HA
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: prometheus
+
+      # Disable built-in ingress — we manage it in templates/ingress.yaml
+      ingress:
+        enabled: false
+
+      service:
+        type: ClusterIP
+
+    # --------------------------------------------------------------------------
+    # Grafana
+    # --------------------------------------------------------------------------
+    grafana:
+      enabled: true
+
+      # Change this via --set or a secrets manager in production
+      adminPassword: "changeme123"
+
+      # Sub-path routing
+      grafana.ini:
+        server:
+          root_url: "%(protocol)s://%(domain)s/grafana/"
+          serve_from_sub_path: true
+        analytics:
+          check_for_updates: false
+        security:
+          disable_gravatar: true
+        log:
+          mode: console
+          level: warn
+
+      # Persistent storage
+      persistence:
+        enabled: true
+        storageClassName: ebs-gp3
+        size: 10Gi
+        accessModes:
+          - ReadWriteOnce
+
+      # Resource limits
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 300m
+          memory: 512Mi
+
+      # Pre-installed dashboards
+      dashboardProviders:
+        dashboardproviders.yaml:
+          apiVersion: 1
+          providers:
+            - name: default
+              orgId: 1
+              folder: ShopEase
+              type: file
+              disableDeletion: false
+              editable: true
+              options:
+                path: /var/lib/grafana/dashboards/default
+
+      # Sidecar to auto-load ConfigMap dashboards
+      sidecar:
+        dashboards:
+          enabled: true
+          label: grafana_dashboard
+          labelValue: "1"
+          searchNamespace: ALL
+        datasources:
+          enabled: true
+          label: grafana_datasource
+
+      # Disable built-in ingress
+      ingress:
+        enabled: false
+
+      service:
+        type: ClusterIP
+        port: 80
+
+    # --------------------------------------------------------------------------
+    # Alertmanager
+    # --------------------------------------------------------------------------
+    alertmanager:
+      enabled: true
+
+      alertmanagerSpec:
+        # Sub-path routing
+        externalUrl: "http://placeholder/alertmanager"
+        routePrefix: /alertmanager
+
+        # Persistent storage
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: ebs-gp3
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 10Gi
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          fsGroup: 65534
+
+      # Disable built-in ingress
+      ingress:
+        enabled: false
+
+      service:
+        type: ClusterIP
+
+    # --------------------------------------------------------------------------
+    # Node Exporter
+    # --------------------------------------------------------------------------
+    nodeExporter:
+      enabled: true
+
+    # --------------------------------------------------------------------------
+    # Kube State Metrics
+    # --------------------------------------------------------------------------
+    kubeStateMetrics:
+      enabled: true
+
+    # --------------------------------------------------------------------------
+    # Default scrape configs
+    # --------------------------------------------------------------------------
+    defaultRules:
+      create: true
+      rules:
+        alertmanager: true
+        etcd: false          # managed EKS — no etcd access
+        configReloaders: true
+        general: true
+        k8s: true
+        kubeApiserverAvailability: true
+        kubeApiserverBurnrate: true
+        kubeApiserverHistogram: true
+        kubeApiserverSlos: true
+        kubeControllerManager: false  # managed EKS
+        kubelet: true
+        kubeProxy: false              # managed EKS
+        kubePrometheusGeneral: true
+        kubePrometheusNodeRecording: true
+        kubernetesApps: true
+        kubernetesResources: true
+        kubernetesStorage: true
+        kubernetesSystem: true
+        kubeSchedulerAlerting: false  # managed EKS
+        kubeSchedulerRecording: false # managed EKS
+        kubeStateMetrics: true
+        network: true
+        node: true
+        nodeExporterAlerting: true
+        nodeExporterRecording: true
+        prometheus: true
+        prometheusOperator: true
+
+# ------------------------------------------------------------------------------
+# Elasticsearch
+# Ref: https://github.com/elastic/helm-charts/tree/main/elasticsearch
+# ------------------------------------------------------------------------------
+elasticsearch:
+  enabled: true
+
+  # Values passed to the elasticsearch sub-chart
+  elasticsearch:
+    replicas: 3
+    minimumMasterNodes: 2
+
+    # Cluster name
+    clusterName: shopease-logs
+
+    # Image
+    image: docker.elastic.co/elasticsearch/elasticsearch
+    imageTag: "8.5.1"
+
+    # JVM heap — set to half of memory limit
+    esJavaOpts: "-Xmx1g -Xms1g"
+
+    # Elasticsearch config
+    esConfig:
+      elasticsearch.yml: |
+        cluster.name: shopease-logs
+        xpack.security.enabled: false
+        xpack.monitoring.collection.enabled: true
+        # Prevent split-brain
+        discovery.zen.minimum_master_nodes: 2
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+    # Persistent storage per replica
+    volumeClaimTemplate:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ebs-gp3
+      resources:
+        requests:
+          storage: 30Gi
+
+    persistence:
+      enabled: true
+
+    # Pod disruption budget — keep at least 2 nodes up
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 2
+
+    # Anti-affinity — spread across AZs
+    antiAffinity: hard
+
+    # Security context
+    securityContext:
+      runAsUser: 1000
+      fsGroup: 1000
+
+    # Readiness probe
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    # No external service needed — accessed internally only
+    service:
+      type: ClusterIP
+
+    # Disable built-in ingress
+    ingress:
+      enabled: false
+
+# ------------------------------------------------------------------------------
+# Kibana
+# Ref: https://github.com/elastic/helm-charts/tree/main/kibana
+# ------------------------------------------------------------------------------
+kibana:
+  enabled: true
+
+  # Values passed to the kibana sub-chart
+  kibana:
+    replicas: 1
+
+    image: docker.elastic.co/kibana/kibana
+    imageTag: "8.5.1"
+
+    # Point to Elasticsearch
+    elasticsearchHosts: "http://elasticsearch-master:9200"
+
+    # Kibana config — basePath must match ingress path
+    kibanaConfig:
+      kibana.yml: |
+        server.name: kibana
+        server.host: "0.0.0.0"
+        server.basePath: "/kibana"
+        server.rewriteBasePath: true
+        elasticsearch.hosts: ["http://elasticsearch-master:9200"]
+        xpack.security.enabled: false
+        elasticsearch.ssl.verificationMode: none
+        logging.root.level: warn
+
+    # Environment variables
+    extraEnvs:
+      - name: NODE_OPTIONS
+        value: "--max-old-space-size=350"
+
+    # Resource limits
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    # Health check path (must include basePath)
+    healthCheckPath: "/kibana/api/status"
+
+    # Readiness probe
+    readinessProbe:
+      failureThreshold: 10
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    # No external service — accessed via ingress
+    service:
+      type: ClusterIP
+      port: 5601
+
+    # Disable built-in ingress
+    ingress:
+      enabled: false
+
+    # Persistent storage (optional — Kibana is mostly stateless)
+    persistence:
+      enabled: false
+
+    # Pod annotations for Prometheus scraping
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "5601"
+      prometheus.io/path: "/kibana/api/status"
