@@ -24,14 +24,13 @@ terraform {
     }
   }
 
-  # Uncomment to enable remote state (recommended for production)
-  # backend "s3" {
-  #   bucket         = "shopease-terraform-state"
-  #   key            = "2-eks-addons/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  #   dynamodb_table = "shopease-terraform-state-lock"
-  # }
+  # S3 backend with built-in state locking (no DynamoDB required)
+  backend "s3" {
+    bucket  = "shopease-terraform-state"
+    key     = "2-eks-addons/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 # Read outputs from layer 1 (infrastructure)
