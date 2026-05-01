@@ -57,37 +57,37 @@ output "core_addons" {
 
 output "cloudwatch_observability" {
   description = "CloudWatch Observability addon details"
-  value = var.enable_cloudwatch_observability ? {
-    addon_version = aws_eks_addon.cloudwatch_observability.addon_version
-    role_arn      = aws_iam_role.cloudwatch_observability.arn
-    role_name     = aws_iam_role.cloudwatch_observability.name
-  } : null
+  value = {
+    addon_version = try(aws_eks_addon.cloudwatch_observability[0].addon_version, "not deployed")
+    role_arn      = try(aws_iam_role.cloudwatch_observability[0].arn, "not deployed")
+    role_name     = try(aws_iam_role.cloudwatch_observability[0].name, "not deployed")
+    enabled       = var.enable_cloudwatch_observability
+  }
 }
 
 # ── AWS LOAD BALANCER CONTROLLER ─────────────────────────────────────────────
 
 output "aws_load_balancer_controller" {
   description = "AWS Load Balancer Controller details"
-  value = var.enable_aws_load_balancer_controller ? {
-    role_arn               = aws_iam_role.aws_lb_controller.arn
-    role_name              = aws_iam_role.aws_lb_controller.name
-    helm_release_name      = helm_release.aws_lb_controller.name
-    helm_version           = helm_release.aws_lb_controller.version
-    ingress_class_external = kubernetes_ingress_class_v1.alb_external.metadata[0].name
-    ingress_class_internal = kubernetes_ingress_class_v1.alb_internal.metadata[0].name
-  } : null
+  value = {
+    role_arn               = try(aws_iam_role.aws_lb_controller[0].arn, "not deployed")
+    role_name              = try(aws_iam_role.aws_lb_controller[0].name, "not deployed")
+    helm_release_name      = try(helm_release.aws_lb_controller[0].name, "not deployed")
+    helm_version           = try(helm_release.aws_lb_controller[0].version, "not deployed")
+    ingress_class_external = try(kubernetes_ingress_class_v1.alb_external[0].metadata[0].name, "not deployed")
+    ingress_class_internal = try(kubernetes_ingress_class_v1.alb_internal[0].metadata[0].name, "not deployed")
+    enabled                = var.enable_aws_load_balancer_controller
+  }
 }
 
 # ── METRICS SERVER ───────────────────────────────────────────────────────────
 
 output "metrics_server" {
   description = "Metrics Server details"
-  value = var.enable_metrics_server ? {
-    helm_release_name = helm_release.metrics_server[0].name
-    helm_version      = helm_release.metrics_server[0].version
-    enabled           = true
-  } : {
-    enabled = false
+  value = {
+    helm_release_name = try(helm_release.metrics_server[0].name, "not deployed")
+    helm_version      = try(helm_release.metrics_server[0].version, "not deployed")
+    enabled           = var.enable_metrics_server
   }
 }
 
@@ -95,12 +95,10 @@ output "metrics_server" {
 
 output "vpa" {
   description = "Vertical Pod Autoscaler details"
-  value = var.enable_vpa ? {
-    helm_release_name = helm_release.vpa[0].name
-    helm_version      = helm_release.vpa[0].version
-    enabled           = true
-  } : {
-    enabled = false
+  value = {
+    helm_release_name = try(helm_release.vpa[0].name, "not deployed")
+    helm_version      = try(helm_release.vpa[0].version, "not deployed")
+    enabled           = var.enable_vpa
   }
 }
 
@@ -108,14 +106,12 @@ output "vpa" {
 
 output "karpenter" {
   description = "Karpenter autoscaler details"
-  value = var.enable_karpenter ? {
-    role_arn          = aws_iam_role.karpenter[0].arn
-    role_name         = aws_iam_role.karpenter[0].name
-    helm_release_name = helm_release.karpenter[0].name
-    helm_version      = helm_release.karpenter[0].version
-    enabled           = true
-  } : {
-    enabled = false
+  value = {
+    role_arn          = try(aws_iam_role.karpenter[0].arn, "not deployed")
+    role_name         = try(aws_iam_role.karpenter[0].name, "not deployed")
+    helm_release_name = try(helm_release.karpenter[0].name, "not deployed")
+    helm_version      = try(helm_release.karpenter[0].version, "not deployed")
+    enabled           = var.enable_karpenter
   }
 }
 
@@ -123,12 +119,10 @@ output "karpenter" {
 
 output "gateway_api" {
   description = "Gateway API CRDs details"
-  value = var.enable_gateway_api ? {
-    helm_release_name = helm_release.gateway_api_crds[0].name
-    helm_version      = helm_release.gateway_api_crds[0].version
-    enabled           = true
-  } : {
-    enabled = false
+  value = {
+    helm_release_name = try(helm_release.gateway_api_crds[0].name, "not deployed")
+    helm_version      = try(helm_release.gateway_api_crds[0].version, "not deployed")
+    enabled           = var.enable_gateway_api
   }
 }
 

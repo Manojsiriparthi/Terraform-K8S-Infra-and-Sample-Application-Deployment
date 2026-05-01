@@ -211,7 +211,7 @@ resource "aws_sqs_queue_policy" "karpenter_interruption" {
         Effect    = "Allow"
         Principal = { Service = ["events.amazonaws.com", "sqs.amazonaws.com"] }
         Action    = "sqs:SendMessage"
-        Resource  = aws_sqs_queue.karpenter_interruption.arn
+        Resource  = aws_sqs_queue.karpenter_interruption[0].arn
       }
     ]
   })
@@ -219,6 +219,8 @@ resource "aws_sqs_queue_policy" "karpenter_interruption" {
 
 # EventBridge rules to forward interruption events to SQS
 resource "aws_cloudwatch_event_rule" "karpenter_spot_interruption" {
+  count = var.enable_karpenter ? 1 : 0
+
   name        = "${var.project_name}-${var.environment}-karpenter-spot"
   description = "Karpenter — EC2 Spot Instance Interruption Warning"
 
@@ -231,11 +233,15 @@ resource "aws_cloudwatch_event_rule" "karpenter_spot_interruption" {
 }
 
 resource "aws_cloudwatch_event_target" "karpenter_spot_interruption" {
-  rule = aws_cloudwatch_event_rule.karpenter_spot_interruption.name
-  arn  = aws_sqs_queue.karpenter_interruption.arn
+  count = var.enable_karpenter ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.karpenter_spot_interruption[0].name
+  arn  = aws_sqs_queue.karpenter_interruption[0].arn
 }
 
 resource "aws_cloudwatch_event_rule" "karpenter_rebalance" {
+  count = var.enable_karpenter ? 1 : 0
+
   name        = "${var.project_name}-${var.environment}-karpenter-rebalance"
   description = "Karpenter — EC2 Instance Rebalance Recommendation"
 
@@ -248,11 +254,15 @@ resource "aws_cloudwatch_event_rule" "karpenter_rebalance" {
 }
 
 resource "aws_cloudwatch_event_target" "karpenter_rebalance" {
-  rule = aws_cloudwatch_event_rule.karpenter_rebalance.name
-  arn  = aws_sqs_queue.karpenter_interruption.arn
+  count = var.enable_karpenter ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.karpenter_rebalance[0].name
+  arn  = aws_sqs_queue.karpenter_interruption[0].arn
 }
 
 resource "aws_cloudwatch_event_rule" "karpenter_instance_state" {
+  count = var.enable_karpenter ? 1 : 0
+
   name        = "${var.project_name}-${var.environment}-karpenter-instance-state"
   description = "Karpenter — EC2 Instance State Change"
 
@@ -265,13 +275,17 @@ resource "aws_cloudwatch_event_rule" "karpenter_instance_state" {
 }
 
 resource "aws_cloudwatch_event_target" "karpenter_instance_state" {
-  rule = aws_cloudwatch_event_rule.karpenter_instance_state.name
-  arn  = aws_sqs_queue.karpenter_interruption.arn
+  count = var.enable_karpenter ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.karpenter_instance_state[0].name
+  arn  = aws_sqs_queue.karpenter_interruption[0].arn
 }
 
 # ── KARPENTER NAMESPACE ───────────────────────────────────────────────────────
 
 resource "kubernetes_namespace" "karpenter" {
+  count = var.enable_karpenter ? 1 : 0
+
   metadata {
     name = "karpenter"
     labels = {
@@ -284,22 +298,24 @@ resource "kubernetes_namespace" "karpenter" {
 # ── HELM RELEASE ──────────────────────────────────────────────────────────────
 
 resource "helm_release" "karpenter" {
+  count = var.enable_karpenter ? 1 : 0
+
   name       = "karpenter"
   repository = "oci://public.ecr.aws/karpenter"
   chart      = "karpenter"
-  namespace  = kubernetes_namespace.karpenter.metadata[0].name
+  namespace  = kubernetes_namespace.karpenter[0].metadata[0].name
   version    = "1.0.6"
 
   values = [
     yamlencode({
       settings = {
         clusterName       = local.cluster_name
-        interruptionQueue = aws_sqs_queue.karpenter_interruption.name
+        interruptionQueue = aws_sqs_queue.karpenter_interruption[0].name
       }
 
       serviceAccount = {
         annotations = {
-          "eks.amazonaws.com/role-arn" = aws_iam_role.karpenter.arn
+          "eks.amazonaws.com/role-arn" = aws_iam_role.karpenter[0].arn
         }
       }
 
@@ -337,6 +353,8 @@ resource "helm_release" "karpenter" {
 # Shared by all NodePools. Sets AMI, subnet discovery, SG discovery.
 
 resource "kubectl_manifest" "karpenter_node_class" {
+  count = var.enable_karpenter ? 1 : 0
+
   yaml_body = <<-YAML
     apiVersion: karpenter.k8s.aws/v1
     kind: EC2NodeClass
@@ -358,7 +376,7 @@ resource "kubectl_manifest" "karpenter_node_class" {
             kubernetes.io/cluster/${local.cluster_name}: owned
 
       # Instance profile for nodes to assume the node IAM role
-      instanceProfile: ${aws_iam_instance_profile.karpenter_node.name}
+      instanceProfile: ${aws_iam_instance_profile.karpenter_node[0].name}
 
       # EBS root volume — encrypted gp3
       blockDeviceMappings:
@@ -389,6 +407,8 @@ resource "kubectl_manifest" "karpenter_node_class" {
 # Uses Spot first, falls back to On-Demand.
 
 resource "kubectl_manifest" "karpenter_nodepool_general" {
+  count = var.enable_karpenter ? 1 : 0
+
   yaml_body = <<-YAML
     apiVersion: karpenter.sh/v1
     kind: NodePool
@@ -467,6 +487,8 @@ resource "kubectl_manifest" "karpenter_nodepool_general" {
 # On-Demand only — databases need stable nodes, not Spot.
 
 resource "kubectl_manifest" "karpenter_nodepool_database" {
+  count = var.enable_karpenter ? 1 : 0
+
   yaml_body = <<-YAML
     apiVersion: karpenter.sh/v1
     kind: NodePool
@@ -543,6 +565,8 @@ resource "kubectl_manifest" "karpenter_nodepool_database" {
 # Scales to zero when no GPU jobs are running.
 
 resource "kubectl_manifest" "karpenter_nodepool_gpu" {
+  count = var.enable_karpenter ? 1 : 0
+
   yaml_body = <<-YAML
     apiVersion: karpenter.sh/v1
     kind: NodePool
