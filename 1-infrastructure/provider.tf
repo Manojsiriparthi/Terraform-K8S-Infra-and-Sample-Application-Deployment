@@ -8,14 +8,16 @@ terraform {
     }
   }
 
-  # Uncomment to enable remote state (recommended for production)
-  # backend "s3" {
-  #   bucket         = "shopease-terraform-state"
-  #   key            = "1-infrastructure/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   encrypt        = true
-  #   dynamodb_table = "shopease-terraform-state-lock"
-  # }
+  # S3 backend with built-in state locking (no DynamoDB required)
+  # Terraform 1.5+ supports native S3 state locking without external DynamoDB
+  backend "s3" {
+    bucket         = "shopease-terraform-state"
+    key            = "1-infrastructure/terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    skip_credentials_validation = false
+    skip_metadata_api_check     = false
+  }
 }
 
 provider "aws" {
