@@ -1,0 +1,10 @@
+---
+# Application Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: application
+  labels:
+    name: application
+    environment: production
+    team: platform

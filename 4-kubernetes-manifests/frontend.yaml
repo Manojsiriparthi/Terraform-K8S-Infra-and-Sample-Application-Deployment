@@ -1,191 +1,133 @@
-# ============================================================================
-# FRONTEND — React + Nginx Deployment
-# ============================================================================
-# Namespace  : app1
-# Node group : general nodes
-# Replicas   : 2 (one per AZ) with HPA up to 8
-# Exposed    : via Gateway API HTTPRoute (external ALB)
-# ============================================================================
+---
+# Frontend Service - Go/HTTP - Port 8080
+# Web UI that connects to all backend services
 
 ---
-# Frontend Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend-service
-  namespace: app1
-  labels:
-    app: shopease
-    tier: frontend
-spec:
-  type: ClusterIP
-  selector:
-    app: shopease
-    tier: frontend
-  ports:
-    - name: http
-      port: 80
-      targetPort: 80
-      protocol: TCP
-
----
-# Frontend Deployment
+# Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: app1
+  namespace: application
   labels:
-    app: shopease
-    tier: frontend
+    app: frontend
+    tier: web
+    language: go
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: shopease
-      tier: frontend
-
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-
+      app: frontend
+  
   template:
     metadata:
       labels:
-        app: shopease
-        tier: frontend
-        version: "1.0"
-
+        app: frontend
+        tier: web
+        language: go
     spec:
+      # Run on public nodes (for external ALB)
       nodeSelector:
-        node-type: general
-
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: DoNotSchedule
-          labelSelector:
-            matchLabels:
-              app: shopease
-              tier: frontend
-
+        role: public
+      
       securityContext:
         runAsNonRoot: true
-        runAsUser: 101        # nginx user
-        runAsGroup: 101
-        fsGroup: 101
-
+        runAsUser: 1000
+        fsGroup: 1000
+      
       containers:
         - name: frontend
-          image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/shopease-frontend:latest
+          # Replace with your ECR image
+          image: <AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/frontend:latest
           imagePullPolicy: Always
+          
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
-
+              protocol: TCP
+          
+          env:
+            - name: PORT
+              value: "8080"
+            
+            # Backend service addresses
+            - name: PRODUCT_CATALOG_SERVICE_ADDR
+              value: "productcatalogservice:3550"
+            - name: CURRENCY_SERVICE_ADDR
+              value: "currencyservice:7000"
+            - name: CART_SERVICE_ADDR
+              value: "cartservice:7070"
+            - name: RECOMMENDATION_SERVICE_ADDR
+              value: "recommendationservice:8080"
+            - name: SHIPPING_SERVICE_ADDR
+              value: "shippingservice:50051"
+            - name: CHECKOUT_SERVICE_ADDR
+              value: "checkoutservice:5050"
+            - name: AD_SERVICE_ADDR
+              value: "adservice:9555"
+            
+            # Optional: Database connection
+            - name: DATABASE_URL
+              value: "postgresql://shopease:shopease123@postgres-service:5432/shopease"
+            
+            - name: DISABLE_PROFILER
+              value: "1"
+          
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 64Mi
             limits:
               cpu: 200m
-              memory: 256Mi
-
+              memory: 128Mi
+          
           livenessProbe:
             httpGet:
-              path: /health
-              port: 80
+              path: /_healthz
+              port: 8080
+              httpHeaders:
+                - name: Cookie
+                  value: "shop_session-id=x-liveness-probe"
             initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 5
             failureThreshold: 3
-
+          
           readinessProbe:
             httpGet:
-              path: /health
-              port: 80
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
+              path: /_healthz
+              port: 8080
+              httpHeaders:
+                - name: Cookie
+                  value: "shop_session-id=x-readiness-probe"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
-
+          
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
             capabilities:
-              drop: ["ALL"]
-
-          volumeMounts:
-            - name: nginx-config
-              mountPath: /etc/nginx/conf.d/default.conf
-              subPath: nginx.conf
-            - name: nginx-cache
-              mountPath: /var/cache/nginx
-            - name: nginx-run
-              mountPath: /var/run
-            - name: tmp
-              mountPath: /tmp
-
-      volumes:
-        - name: nginx-config
-          configMap:
-            name: frontend-nginx-config
-        - name: nginx-cache
-          emptyDir: {}
-        - name: nginx-run
-          emptyDir: {}
-        - name: tmp
-          emptyDir: {}
-
-      terminationGracePeriodSeconds: 30
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
 
 ---
-# HPA for frontend
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
+# Service
+apiVersion: v1
+kind: Service
 metadata:
-  name: frontend-hpa
-  namespace: app1
+  name: frontend
+  namespace: application
+  labels:
+    app: frontend
+    tier: web
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: frontend
-  minReplicas: 2
-  maxReplicas: 8
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-        - type: Percent
-          value: 25
-          periodSeconds: 60
-    scaleUp:
-      stabilizationWindowSeconds: 0
-      policies:
-        - type: Percent
-          value: 100
-          periodSeconds: 30
-
----
-# PodDisruptionBudget
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: frontend-pdb
-  namespace: app1
-spec:
-  minAvailable: 1
+  type: ClusterIP
   selector:
-    matchLabels:
-      app: shopease
-      tier: frontend
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

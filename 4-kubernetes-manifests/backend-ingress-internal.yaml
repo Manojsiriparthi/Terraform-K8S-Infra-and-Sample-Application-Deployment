@@ -1,0 +1,120 @@
+---
+# Internal ALB - Backend Services (Private)
+# Shared ALB for backend APIs and monitoring
+# Uses path-based routing to route to different backend services
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-ingress
+  namespace: application
+  annotations:
+    # ALB Configuration
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: backend-monitoring  # SHARED ALB
+    alb.ingress.kubernetes.io/group.order: '1'  # Backend evaluated first
+    
+    # Health Check
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
+    
+    # Ports
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    
+    # Tags
+    alb.ingress.kubernetes.io/tags: Environment=production,Team=backend,Application=shopease
+  
+  labels:
+    app: backend
+    tier: api
+
+spec:
+  ingressClassName: alb
+  
+  rules:
+    - http:
+        paths:
+          # Product Catalog Service
+          - path: /api/products
+            pathType: Prefix
+            backend:
+              service:
+                name: productcatalogservice
+                port:
+                  number: 3550
+          
+          # Cart Service
+          - path: /api/cart
+            pathType: Prefix
+            backend:
+              service:
+                name: cartservice
+                port:
+                  number: 7070
+          
+          # Checkout Service
+          - path: /api/checkout
+            pathType: Prefix
+            backend:
+              service:
+                name: checkoutservice
+                port:
+                  number: 5050
+          
+          # Currency Service
+          - path: /api/currency
+            pathType: Prefix
+            backend:
+              service:
+                name: currencyservice
+                port:
+                  number: 7000
+          
+          # Shipping Service
+          - path: /api/shipping
+            pathType: Prefix
+            backend:
+              service:
+                name: shippingservice
+                port:
+                  number: 50051
+          
+          # Recommendation Service
+          - path: /api/recommendations
+            pathType: Prefix
+            backend:
+              service:
+                name: recommendationservice
+                port:
+                  number: 8080
+          
+          # Ad Service
+          - path: /api/ads
+            pathType: Prefix
+            backend:
+              service:
+                name: adservice
+                port:
+                  number: 9555
+          
+          # Payment Service
+          - path: /api/payment
+            pathType: Prefix
+            backend:
+              service:
+                name: paymentservice
+                port:
+                  number: 50051
+          
+          # Email Service
+          - path: /api/email
+            pathType: Prefix
+            backend:
+              service:
+                name: emailservice
+                port:
+                  number: 8080

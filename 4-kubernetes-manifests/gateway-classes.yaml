@@ -1,76 +1,26 @@
 # ============================================================================
-# GATEWAY API — GATEWAYCLASS
+# GATEWAY API - GatewayClass
 # ============================================================================
-# Gateway API is the modern replacement for Ingress.
-# AWS Load Balancer Controller supports Gateway API natively.
+# GatewayClass defines the type of Gateway (AWS ALB in this case)
+# This is OPTIONAL - only needed if using Gateway API instead of Ingress
 #
-# Two GatewayClasses:
-#   external-gateway — internet-facing ALB (public apps)
-#   internal-gateway — internal ALB (backend APIs + monitoring)
+# Prerequisites:
+# 1. Gateway API CRDs installed (via Terraform: enable_gateway_api = true)
+# 2. AWS Load Balancer Controller installed (already done in 2-eks-addons)
 #
-# Apply this FIRST before any Gateway or HTTPRoute resources.
+# Gateway API is next-generation Ingress - more flexible and powerful
+# Current setup uses Ingress (frontend-ingress-external.yaml, backend-ingress-internal.yaml)
+# You can migrate to Gateway API in the future if needed
 # ============================================================================
 
 ---
-# External GatewayClass — internet-facing ALB
+# GatewayClass for AWS ALB
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
-  name: external-gateway-class
+  name: aws-alb
   labels:
-    app.kubernetes.io/managed-by: aws-load-balancer-controller
+    app: aws-load-balancer-controller
 spec:
-  controllerName: gateway.k8s.aws/alb
-  parametersRef:
-    group: gateway.k8s.aws
-    kind: AlbConfig
-    name: external-alb-config
-    namespace: kube-system
-
----
-# Internal GatewayClass — private ALB
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: internal-gateway-class
-  labels:
-    app.kubernetes.io/managed-by: aws-load-balancer-controller
-spec:
-  controllerName: gateway.k8s.aws/alb
-  parametersRef:
-    group: gateway.k8s.aws
-    kind: AlbConfig
-    name: internal-alb-config
-    namespace: kube-system
-
----
-# AlbConfig for external ALB
-apiVersion: gateway.k8s.aws/v1beta1
-kind: AlbConfig
-metadata:
-  name: external-alb-config
-  namespace: kube-system
-spec:
-  scheme: internet-facing
-  ipAddressType: ipv4
-  loadBalancerAttributes:
-    - key: idle_timeout.timeout_seconds
-      value: "60"
-    - key: routing.http2.enabled
-      value: "true"
-
----
-# AlbConfig for internal ALB
-apiVersion: gateway.k8s.aws/v1beta1
-kind: AlbConfig
-metadata:
-  name: internal-alb-config
-  namespace: kube-system
-spec:
-  scheme: internal
-  ipAddressType: ipv4
-  loadBalancerAttributes:
-    - key: idle_timeout.timeout_seconds
-      value: "60"
-    - key: routing.http2.enabled
-      value: "true"
+  controllerName: eks.amazonaws.com/aws-load-balancer-controller
+  description: "AWS Application Load Balancer Gateway Class"

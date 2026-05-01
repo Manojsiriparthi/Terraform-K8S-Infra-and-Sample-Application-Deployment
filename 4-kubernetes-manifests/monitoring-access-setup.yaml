@@ -1,8 +1,8 @@
 # ============================================================================
 # MONITORING ACCESS SETUP — Grafana Orgs + Kibana Spaces
 # ============================================================================
-# Run these steps ONCE after the monitoring stack is deployed.
-# Each app team manages their own users after initial setup.
+# Multi-tenant monitoring setup for different application teams
+# Each team gets their own isolated monitoring view
 #
 # GRAFANA SETUP (run by platform-team after deploy):
 #   1. Create org per app team
@@ -45,7 +45,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       nodeSelector:
-        node-type: general
+        role: private
       containers:
         - name: grafana-setup
           image: curlimages/curl:8.5.0
@@ -73,7 +73,7 @@ spec:
                 -u "admin:${ADMIN_PASS}" \
                 "${GRAFANA_URL}/api/user/using/${APP1_ORG_ID}"
 
-              echo "=== Adding Prometheus datasource for app1 (namespace=app1 filter) ==="
+              echo "=== Adding Prometheus datasource for app1 (namespace=application filter) ==="
               curl -sf -X POST \
                 -H "Content-Type: application/json" \
                 -u "admin:${ADMIN_PASS}" \
@@ -86,7 +86,7 @@ spec:
                   \"isDefault\": true,
                   \"jsonData\": {
                     \"httpMethod\": \"POST\",
-                    \"customQueryParameters\": \"namespace=app1\"
+                    \"customQueryParameters\": \"namespace=application\"
                   }
                 }"
 
@@ -97,7 +97,7 @@ spec:
                 "${GRAFANA_URL}/api/admin/users" \
                 -d "{
                   \"name\": \"App1 Admin\",
-                  \"email\": \"app1-admin@shopease.com\",
+                  \"email\": \"app1-admin@company.com\",
                   \"login\": \"app1-admin\",
                   \"password\": \"${APP1_GRAFANA_PASSWORD}\",
                   \"OrgId\": ${APP1_ORG_ID}
@@ -115,7 +115,7 @@ spec:
                 -d '{"role": "Admin"}'
 
               echo "=== app1 Grafana setup complete ==="
-              echo "app1-team can now login at: internal-alb/app1/grafana"
+              echo "app1-team can now login at: internal-alb/grafana"
               echo "Username: app1-admin"
               echo "They can create additional users inside their org"
 
@@ -132,7 +132,7 @@ spec:
                   key: password
 
 ---
-# Job: Create Grafana Org for app2-team
+# Job: Create Grafana Org for app2-team (future application)
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -147,7 +147,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       nodeSelector:
-        node-type: general
+        role: private
       containers:
         - name: grafana-setup
           image: curlimages/curl:8.5.0
@@ -193,7 +193,7 @@ spec:
                 "${GRAFANA_URL}/api/admin/users" \
                 -d "{
                   \"name\": \"App2 Admin\",
-                  \"email\": \"app2-admin@shopease.com\",
+                  \"email\": \"app2-admin@company.com\",
                   \"login\": \"app2-admin\",
                   \"password\": \"${APP2_GRAFANA_PASSWORD}\",
                   \"OrgId\": ${APP2_ORG_ID}
@@ -222,132 +222,3 @@ spec:
                 secretKeyRef:
                   name: app2-grafana-secret
                   key: password
-
----
-# ── KIBANA SETUP JOBS ─────────────────────────────────────────────────────────
-
-# Job: Create Kibana space for app1-team
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: kibana-setup-app1-space
-  namespace: monitoring
-  labels:
-    app: kibana-setup
-    team: app1
-spec:
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      restartPolicy: OnFailure
-      nodeSelector:
-        node-type: general
-      containers:
-        - name: kibana-setup
-          image: curlimages/curl:8.5.0
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-              KIBANA_URL="http://monitoring-kibana.monitoring.svc.cluster.local:5601"
-
-              echo "=== Waiting for Kibana to be ready ==="
-              until curl -sf "${KIBANA_URL}/kibana/api/status" > /dev/null; do
-                echo "Waiting for Kibana..."
-                sleep 5
-              done
-
-              echo "=== Creating app1 Kibana space ==="
-              curl -sf -X POST \
-                -H "Content-Type: application/json" \
-                -H "kbn-xsrf: true" \
-                "${KIBANA_URL}/kibana/api/spaces/space" \
-                -d '{
-                  "id": "app1",
-                  "name": "App1 Logs",
-                  "description": "Log space for app1-team — app1-logs-* indices only",
-                  "initials": "A1",
-                  "color": "#00BFB3"
-                }'
-
-              echo "=== Creating app1 index pattern in app1 space ==="
-              curl -sf -X POST \
-                -H "Content-Type: application/json" \
-                -H "kbn-xsrf: true" \
-                "${KIBANA_URL}/kibana/s/app1/api/index_patterns/index_pattern" \
-                -d '{
-                  "index_pattern": {
-                    "title": "app1-logs-*",
-                    "timeFieldName": "@timestamp"
-                  }
-                }'
-
-              echo "=== app1 Kibana space setup complete ==="
-              echo "app1-team accesses: internal-alb/app1/kibana"
-              echo "They see ONLY app1-logs-* indices"
-
----
-# Job: Create Kibana space for app2-team
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: kibana-setup-app2-space
-  namespace: monitoring
-  labels:
-    app: kibana-setup
-    team: app2
-spec:
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      restartPolicy: OnFailure
-      nodeSelector:
-        node-type: general
-      containers:
-        - name: kibana-setup
-          image: curlimages/curl:8.5.0
-          command:
-            - sh
-            - -c
-            - |
-              set -e
-              KIBANA_URL="http://monitoring-kibana.monitoring.svc.cluster.local:5601"
-
-              until curl -sf "${KIBANA_URL}/kibana/api/status" > /dev/null; do
-                sleep 5
-              done
-
-              curl -sf -X POST \
-                -H "Content-Type: application/json" \
-                -H "kbn-xsrf: true" \
-                "${KIBANA_URL}/kibana/api/spaces/space" \
-                -d '{
-                  "id": "app2",
-                  "name": "App2 Logs",
-                  "description": "Log space for app2-team — app2-logs-* indices only",
-                  "initials": "A2",
-                  "color": "#F04E98"
-                }'
-
-              curl -sf -X POST \
-                -H "Content-Type: application/json" \
-                -H "kbn-xsrf: true" \
-                "${KIBANA_URL}/kibana/s/app2/api/index_patterns/index_pattern" \
-                -d '{
-                  "index_pattern": {
-                    "title": "app2-logs-*",
-                    "timeFieldName": "@timestamp"
-                  }
-                }'
-
-              echo "=== app2 Kibana space setup complete ==="
-
----
-# ── SECRETS ───────────────────────────────────────────────────────────────────
-# Secrets are NOT defined here.
-# They are created automatically by External Secrets Operator
-# from AWS Secrets Manager — see monitoring-credentials.yaml.
-#
-# Apply monitoring-credentials.yaml BEFORE running these setup jobs.
-# The jobs read passwords from the Kubernetes Secrets that ESO creates.

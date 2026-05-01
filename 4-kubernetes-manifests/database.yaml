@@ -1,184 +1,186 @@
-# ============================================================================
-# DATABASE — PostgreSQL StatefulSet
-# ============================================================================
-# Namespace   : app1-database (isolated — only app1 backend can reach it)
-# Node group  : database nodes (taint: workload=database:NoSchedule)
-# Replicas    : 3 — one per AZ, spread via topologySpreadConstraints
-# Storage     : EBS gp3-high-perf via volumeClaimTemplates (one volume per pod)
-# Access      : ClusterIP only — never exposed outside cluster
-# Autoscaling : Karpenter provisions database nodes on demand
-#               HPA not used for StatefulSet — manual replica management
-# ============================================================================
+---
+# PostgreSQL Database for Orders, Customers, Products
+# Redis is for cart cache (temporary data)
+# PostgreSQL is for persistent data (orders, customers, products)
 
 ---
-# Headless service — gives each pod a stable DNS name
-# postgres-0.postgres-headless.app1-database.svc.cluster.local
-# postgres-1.postgres-headless.app1-database.svc.cluster.local
-# postgres-2.postgres-headless.app1-database.svc.cluster.local
+# PostgreSQL Secret
 apiVersion: v1
-kind: Service
+kind: Secret
 metadata:
-  name: postgres-headless
-  namespace: app1-database
-  labels:
-    app: postgres
-    tier: database
-spec:
-  clusterIP: None
-  selector:
-    app: postgres
-  ports:
-    - name: postgres
-      port: 5432
-      targetPort: 5432
+  name: postgres-secret
+  namespace: application
+type: Opaque
+stringData:
+  POSTGRES_USER: shopease
+  POSTGRES_PASSWORD: shopease123  # Change in production!
+  POSTGRES_DB: shopease
 
 ---
-# ClusterIP service — backend connects via this stable DNS
-# postgres-service.app1-database.svc.cluster.local:5432
+# PostgreSQL ConfigMap (Init SQL)
 apiVersion: v1
-kind: Service
+kind: ConfigMap
 metadata:
-  name: postgres-service
-  namespace: app1-database
-  labels:
-    app: postgres
-    tier: database
-spec:
-  type: ClusterIP
-  selector:
-    app: postgres
-  ports:
-    - name: postgres
-      port: 5432
-      targetPort: 5432
-      protocol: TCP
+  name: postgres-init-script
+  namespace: application
+data:
+  init.sql: |
+    -- Create tables for e-commerce application
+    
+    -- Products table
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price_usd_currency_code VARCHAR(3) DEFAULT 'USD',
+        price_usd_units BIGINT NOT NULL,
+        price_usd_nanos INTEGER NOT NULL,
+        picture VARCHAR(500),
+        categories TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Customers table
+    CREATE TABLE IF NOT EXISTS customers (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        first_name VARCHAR(100),
+        last_name VARCHAR(100),
+        phone VARCHAR(20),
+        address_street VARCHAR(255),
+        address_city VARCHAR(100),
+        address_state VARCHAR(100),
+        address_country VARCHAR(100),
+        address_zip VARCHAR(20),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Orders table
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER REFERENCES customers(id),
+        order_id VARCHAR(100) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        total_amount_currency_code VARCHAR(3) DEFAULT 'USD',
+        total_amount_units BIGINT NOT NULL,
+        total_amount_nanos INTEGER NOT NULL,
+        shipping_cost_currency_code VARCHAR(3) DEFAULT 'USD',
+        shipping_cost_units BIGINT NOT NULL,
+        shipping_cost_nanos INTEGER NOT NULL,
+        shipping_address_street VARCHAR(255),
+        shipping_address_city VARCHAR(100),
+        shipping_address_state VARCHAR(100),
+        shipping_address_country VARCHAR(100),
+        shipping_address_zip VARCHAR(20),
+        shipping_tracking_id VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Order items table
+    CREATE TABLE IF NOT EXISTS order_items (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER REFERENCES orders(id),
+        product_id VARCHAR(100) NOT NULL,
+        quantity INTEGER NOT NULL,
+        price_currency_code VARCHAR(3) DEFAULT 'USD',
+        price_units BIGINT NOT NULL,
+        price_nanos INTEGER NOT NULL
+    );
+
+    -- Insert sample products
+    INSERT INTO products (name, description, price_usd_units, price_usd_nanos, picture, categories) VALUES
+    ('Vintage Typewriter', 'Vintage typewriter for the modern writer', 67, 990000000, '/static/img/products/typewriter.jpg', 'vintage'),
+    ('Vintage Camera Lens', 'Vintage camera lens for photography enthusiasts', 12, 490000000, '/static/img/products/camera-lens.jpg', 'photography,vintage'),
+    ('Home Barista Kit', 'Complete coffee brewing kit for home baristas', 124, 0, '/static/img/products/barista-kit.jpg', 'kitchen'),
+    ('Terrarium', 'Small glass terrarium with succulents', 36, 450000000, '/static/img/products/terrarium.jpg', 'gardening'),
+    ('Film Camera', 'Vintage film camera in working condition', 2295, 0, '/static/img/products/film-camera.jpg', 'photography,vintage'),
+    ('Vintage Record Player', 'Refurbished vintage record player', 65, 500000000, '/static/img/products/record-player.jpg', 'music,vintage'),
+    ('Metal Camping Mug', 'Durable metal camping mug', 24, 330000000, '/static/img/products/camp-mug.jpg', 'camping'),
+    ('City Bike', 'Vintage-style city bicycle', 789, 500000000, '/static/img/products/city-bike.jpg', 'cycling'),
+    ('Air Plant', 'Low-maintenance air plant', 12, 300000000, '/static/img/products/air-plant.jpg', 'gardening')
+    ON CONFLICT DO NOTHING;
+
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_email ON orders(email);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+    CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+    CREATE INDEX IF NOT EXISTS idx_products_categories ON products(categories);
 
 ---
-# PostgreSQL StatefulSet — 3 replicas across 3 AZs
-# NOTE: This runs 3 independent PostgreSQL instances (not a cluster).
-# For true HA with replication, use CloudNativePG or Patroni operator.
-# Each pod has its own EBS volume in its AZ.
+# PostgreSQL StatefulSet
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: postgres
-  namespace: app1-database
+  namespace: application
   labels:
     app: postgres
     tier: database
 spec:
-  serviceName: postgres-headless
-  replicas: 3                  # one per AZ — spread via topologySpreadConstraints
-  podManagementPolicy: Parallel  # start all pods simultaneously, not sequentially
+  serviceName: postgres-service
+  replicas: 1
   selector:
     matchLabels:
       app: postgres
+      tier: database
+  
+  # Persistent volume claim template
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app: postgres
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ebs-gp3
+        resources:
+          requests:
+            storage: 20Gi
+  
   template:
     metadata:
       labels:
         app: postgres
         tier: database
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9187"
     spec:
-      # ── Schedule ONLY on database nodes (Karpenter database NodePool) ─────
+      # Run on database nodes (with taint)
       nodeSelector:
-        node-type: database
-
+        role: database
+      
       tolerations:
-        - key: "workload"
-          operator: "Equal"
-          value: "database"
-          effect: "NoSchedule"
-
-      # ── Spread across all 3 AZs — one pod per AZ ─────────────────────────
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: DoNotSchedule
-          labelSelector:
-            matchLabels:
-              app: postgres
-
-      # ── Anti-affinity — never 2 postgres pods on same node ───────────────
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values: ["postgres"]
-              topologyKey: kubernetes.io/hostname
-
-      # ── Security context ──────────────────────────────────────────────────
+        - key: workload
+          operator: Equal
+          value: database
+          effect: NoSchedule
+      
       securityContext:
-        runAsUser: 999
-        runAsGroup: 999
-        fsGroup: 999
         runAsNonRoot: true
-
-      # ── Init container — fix volume permissions ───────────────────────────
-      initContainers:
-        - name: init-permissions
-          image: busybox:1.36
-          command: ["sh", "-c", "chown -R 999:999 /var/lib/postgresql/data"]
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
-          securityContext:
-            runAsUser: 0
-
+        runAsUser: 999
+        fsGroup: 999
+      
       containers:
-        # ── Main PostgreSQL container ─────────────────────────────────────
         - name: postgres
           image: postgres:15-alpine
-          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5432
               name: postgres
-
-          env:
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_DB
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-            - name: POSTGRES_INITDB_ARGS
-              value: "--encoding=UTF8 --locale=en_US.UTF-8"
-
-          # PostgreSQL performance tuning
-          args:
-            - "-c"
-            - "max_connections=200"
-            - "-c"
-            - "shared_buffers=256MB"
-            - "-c"
-            - "effective_cache_size=768MB"
-            - "-c"
-            - "maintenance_work_mem=64MB"
-            - "-c"
-            - "checkpoint_completion_target=0.9"
-            - "-c"
-            - "wal_buffers=16MB"
-            - "-c"
-            - "default_statistics_target=100"
-            - "-c"
-            - "log_min_duration_statement=1000"
-
+          
+          envFrom:
+            - secretRef:
+                name: postgres-secret
+          
+          # Persistent volume mount
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+          
+          # Resource limits
           resources:
             requests:
               cpu: 500m
@@ -186,208 +188,59 @@ spec:
             limits:
               cpu: 1000m
               memory: 2Gi
-
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
-            - name: init-sql
-              mountPath: /docker-entrypoint-initdb.d
-              readOnly: true
-
-          # Liveness — is postgres process alive?
+          
+          # Liveness probe
           livenessProbe:
             exec:
               command:
                 - pg_isready
                 - -U
                 - shopease
-                - -d
-                - shopease
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
-            successThreshold: 1
-
-          # Readiness — is postgres ready to accept connections?
+          
+          # Readiness probe
           readinessProbe:
             exec:
               command:
                 - pg_isready
                 - -U
                 - shopease
-                - -d
-                - shopease
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
-            successThreshold: 1
-
-          # Startup — give postgres time to recover from crash/restore
-          startupProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - shopease
-                - -d
-                - shopease
-            initialDelaySeconds: 15
-            periodSeconds: 5
-            failureThreshold: 24   # 2 minutes total startup time
-            successThreshold: 1
-
+          
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # postgres writes to PGDATA
             capabilities:
-              drop: ["ALL"]
-
-        # ── Postgres Exporter sidecar — Prometheus metrics ────────────────
-        - name: postgres-exporter
-          image: prometheuscommunity/postgres-exporter:v0.15.0
-          ports:
-            - containerPort: 9187
-              name: metrics
-
-          env:
-            # Build connection string from individual secret values
-            # NOTE: Using direct secretKeyRef — NOT $(VAR) substitution
-            # which does not work reliably across all Kubernetes versions
-            - name: PG_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
-            - name: PG_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
-            - name: PG_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_DB
-            - name: DATA_SOURCE_URI
-              value: "localhost:5432/shopease?sslmode=disable"
-            - name: DATA_SOURCE_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
-            - name: DATA_SOURCE_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
-
-          livenessProbe:
-            httpGet:
-              path: /metrics
-              port: 9187
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
-
-          readinessProbe:
-            httpGet:
-              path: /metrics
-              port: 9187
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 100m
-              memory: 128Mi
-
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
-            capabilities:
-              drop: ["ALL"]
-
+              drop:
+                - ALL
+      
       volumes:
-        - name: init-sql
+        - name: init-script
           configMap:
-            name: postgres-init-sql
-
-      terminationGracePeriodSeconds: 60
-
-  # ── EBS volume per pod — one per AZ ──────────────────────────────────────
-  volumeClaimTemplates:
-    - metadata:
-        name: postgres-data
-        labels:
-          app: postgres
-        annotations:
-          helm.sh/resource-policy: keep
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: ebs-gp3-high-perf
-        resources:
-          requests:
-            storage: 20Gi
+            name: postgres-init-script
 
 ---
-# Init SQL ConfigMap
+# PostgreSQL Service (ClusterIP - Internal Only)
 apiVersion: v1
-kind: ConfigMap
+kind: Service
 metadata:
-  name: postgres-init-sql
-  namespace: app1-database
+  name: postgres-service
+  namespace: application
   labels:
     app: postgres
     tier: database
-data:
-  init.sql: |
-    CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        category VARCHAR(100) NOT NULL,
-        price DECIMAL(10, 2) NOT NULL,
-        image VARCHAR(500),
-        stock INTEGER DEFAULT 0,
-        description TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
-        customer_email VARCHAR(255) NOT NULL,
-        total_amount DECIMAL(10, 2) NOT NULL,
-        status VARCHAR(50) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS order_items (
-        id SERIAL PRIMARY KEY,
-        order_id INTEGER REFERENCES orders(id),
-        product_id INTEGER REFERENCES products(id),
-        quantity INTEGER NOT NULL,
-        price DECIMAL(10, 2) NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
-    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
-
----
-# PodDisruptionBudget — keep at least 2 postgres pods during node maintenance
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: postgres-pdb
-  namespace: app1-database
 spec:
-  minAvailable: 2            # with 3 replicas, max 1 can be disrupted at a time
+  type: ClusterIP
   selector:
-    matchLabels:
-      app: postgres
+    app: postgres
+    tier: database
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres

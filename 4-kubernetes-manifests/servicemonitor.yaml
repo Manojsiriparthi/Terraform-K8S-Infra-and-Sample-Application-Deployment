@@ -1,108 +1,175 @@
 # ============================================================================
-# SERVICEMONITOR — Prometheus scrape config for app1
+# SERVICEMONITOR — Prometheus Scrape Configuration
 # ============================================================================
-# Deployed in app1-monitoring namespace.
-# Prometheus discovers this via namespace label: monitoring=true
-# Scrapes ONLY app1 namespace pods — app1-team sees only their metrics.
+# Tells Prometheus which services to scrape for metrics
+# Works with Prometheus Operator installed via Terraform (2-eks-addons)
+#
+# MULTI-TENANCY:
+# - Each ServiceMonitor is scoped to specific namespace
+# - app1-team sees only 'application' namespace metrics
+# - app2-team sees only 'app2' namespace metrics (future)
 # ============================================================================
 
 ---
-# ServiceMonitor for backend
+# ServiceMonitor for Backend Services
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: app1-backend-monitor
-  namespace: app1-monitoring
+  name: backend-services-monitor
+  namespace: application
   labels:
-    app: app1
-    release: monitoring    # must match Prometheus operator label selector
+    app: backend
+    release: kube-prometheus-stack  # Must match Prometheus operator label selector
 spec:
   namespaceSelector:
     matchNames:
-      - app1               # scrape ONLY app1 namespace
+      - application  # Scrape ONLY application namespace
   selector:
     matchLabels:
       tier: backend
   endpoints:
-    - port: http
-      path: /health
-      interval: 30s
-      scrapeTimeout: 10s
-
----
-# ServiceMonitor for postgres-exporter
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: app1-database-monitor
-  namespace: app1-monitoring
-  labels:
-    app: app1
-    release: monitoring
-spec:
-  namespaceSelector:
-    matchNames:
-      - app1-database      # scrape ONLY app1-database namespace
-  selector:
-    matchLabels:
-      app: postgres
-  endpoints:
-    - port: metrics
+    - port: grpc
       path: /metrics
       interval: 30s
       scrapeTimeout: 10s
 
 ---
-# PrometheusRule — app1-specific alerting rules
+# ServiceMonitor for Frontend
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: frontend-monitor
+  namespace: application
+  labels:
+    app: frontend
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - application
+  selector:
+    matchLabels:
+      app: frontend
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# ServiceMonitor for PostgreSQL
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-monitor
+  namespace: application
+  labels:
+    app: postgres
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - application
+  selector:
+    matchLabels:
+      app: postgres
+  endpoints:
+    - port: postgres
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# ServiceMonitor for Redis
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: application
+  labels:
+    app: redis
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - application
+  selector:
+    matchLabels:
+      app: redis-cart
+  endpoints:
+    - port: redis
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# PrometheusRule — Alerting Rules for Application
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: app1-alerts
-  namespace: app1-monitoring
+  name: application-alerts
+  namespace: application
   labels:
-    app: app1
-    release: monitoring
+    app: application
+    release: kube-prometheus-stack
 spec:
   groups:
-    - name: app1.backend
+    - name: application.backend
       interval: 30s
       rules:
-        - alert: App1BackendDown
-          expr: up{namespace="app1", tier="backend"} == 0
+        - alert: BackendPodDown
+          expr: up{namespace="application", tier="backend"} == 0
           for: 2m
           labels:
             severity: critical
             team: app1
           annotations:
-            summary: "App1 backend pod is down"
+            summary: "Backend pod is down in application namespace"
+            description: "Pod {{ $labels.pod }} has been down for more than 2 minutes"
 
-        - alert: App1HighErrorRate
+        - alert: HighErrorRate
           expr: |
-            rate(http_requests_total{namespace="app1", status=~"5.."}[5m]) > 0.05
+            rate(http_requests_total{namespace="application", status=~"5.."}[5m]) > 0.05
           for: 5m
           labels:
             severity: warning
             team: app1
           annotations:
-            summary: "App1 backend error rate above 5%"
+            summary: "High error rate detected"
+            description: "Error rate is above 5% for {{ $labels.service }}"
 
-    - name: app1.database
+    - name: application.database
       interval: 60s
       rules:
-        - alert: App1DatabaseDown
-          expr: up{namespace="app1-database"} == 0
+        - alert: DatabaseDown
+          expr: up{namespace="application", app="postgres"} == 0
           for: 2m
           labels:
             severity: critical
             team: app1
           annotations:
-            summary: "App1 PostgreSQL is unreachable"
+            summary: "PostgreSQL database is down"
+            description: "Database has been unreachable for more than 2 minutes"
 
-        - alert: App1DatabaseHighConnections
-          expr: pg_stat_activity_count{namespace="app1-database"} > 150
+        - alert: DatabaseHighConnections
+          expr: pg_stat_activity_count{namespace="application"} > 150
           for: 5m
           labels:
             severity: warning
             team: app1
           annotations:
-            summary: "App1 PostgreSQL connection count is high"
+            summary: "PostgreSQL connection count is high"
+            description: "Connection count is {{ $value }}, threshold is 150"
+
+    - name: application.redis
+      interval: 60s
+      rules:
+        - alert: RedisDown
+          expr: up{namespace="application", app="redis-cart"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: app1
+          annotations:
+            summary: "Redis cache is down"
+            description: "Redis has been unreachable for more than 2 minutes"

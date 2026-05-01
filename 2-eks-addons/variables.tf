@@ -1,3 +1,7 @@
+# ============================================================================
+# EKS ADDONS VARIABLES
+# ============================================================================
+
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -16,18 +20,13 @@ variable "environment" {
   default     = "production"
 }
 
-variable "owner_email" {
-  description = "Owner email"
+variable "cluster_name" {
+  description = "EKS cluster name"
   type        = string
 }
 
-variable "created_by" {
-  description = "Created by username"
-  type        = string
-}
-
-variable "cost_center" {
-  description = "Cost center for billing"
-  type        = string
-  default     = "engineering"
+variable "enable_gateway_api" {
+  description = "Enable Gateway API CRDs (optional - Ingress already works)"
+  type        = bool
+  default     = false
 }
