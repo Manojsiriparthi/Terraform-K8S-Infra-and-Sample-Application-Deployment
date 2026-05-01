@@ -44,7 +44,7 @@ data "aws_ami" "amazon_linux_2023" {
 
 resource "aws_security_group" "bastion" {
   name        = "${var.project_name}-${var.environment}-bastion-sg"
-  description = "Bastion host — SSM only, no inbound rules required"
+  description = "Bastion host - SSM only, no inbound rules required"
   vpc_id      = var.vpc_id
 
   # No inbound rules — SSM Session Manager does not need any inbound port

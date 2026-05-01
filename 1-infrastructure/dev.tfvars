@@ -36,10 +36,10 @@ general_node_max_size       = 4              # Lower max for dev
 # Database Node Group (taint: workload=database:NoSchedule)
 # DEV: Smaller memory-optimized instances
 database_node_instance_types = ["t3.medium"]  # Smaller than prod (r6i.xlarge)
-database_node_desired_size   = 2           # Single node for dev
+database_node_desired_size   = 2              # Two nodes for dev
 database_node_min_size       = 2
 database_node_max_size       = 3
-database_node_disk_size      = 50            # Smaller disk for dev
+database_node_disk_size      = 50             # Smaller disk for dev
 
 # GPU Node Group (taint: workload=gpu:NoSchedule)
 # DEV: DISABLED - No GPU nodes in development to save costs

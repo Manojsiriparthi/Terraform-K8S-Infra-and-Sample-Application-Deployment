@@ -14,7 +14,7 @@ variable "vpc_id" {
 }
 
 variable "private_subnet_id" {
-  description = "Private subnet ID — bastion placed in private subnet, SSM handles access"
+  description = "Private subnet ID - bastion placed in private subnet, SSM handles access"
   type        = string
 }
 
@@ -25,7 +25,7 @@ variable "instance_type" {
 }
 
 variable "iam_instance_profile_name" {
-  description = "IAM instance profile name — must have AmazonSSMManagedInstanceCore attached"
+  description = "IAM instance profile name - must have AmazonSSMManagedInstanceCore attached"
   type        = string
 }
 
