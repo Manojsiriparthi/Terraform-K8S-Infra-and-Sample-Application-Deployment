@@ -9,7 +9,7 @@ project_name = "shopease"
 environment  = "development"
 
 # Tagging
-owner_email = "devops@shopease.com"
+owner_email = "manojs.devops1@gmail.com"
 created_by  = "platform-team"
 cost_center = "engineering"
 
