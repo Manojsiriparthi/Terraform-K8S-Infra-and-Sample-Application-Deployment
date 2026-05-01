@@ -61,6 +61,9 @@ get_aws_info() {
 apply_infrastructure() {
     print_header "OPTION 1: Apply Infrastructure (Folders 1 & 2)"
     
+    # Get AWS info first
+    get_aws_info
+    
     echo ""
     echo "Select tfvars file:"
     echo "1) dev.tfvars"
