@@ -20,11 +20,6 @@ variable "environment" {
   default     = "production"
 }
 
-variable "cluster_name" {
-  description = "EKS cluster name"
-  type        = string
-}
-
 variable "enable_gateway_api" {
   description = "Enable Gateway API CRDs (optional - Ingress already works)"
   type        = bool

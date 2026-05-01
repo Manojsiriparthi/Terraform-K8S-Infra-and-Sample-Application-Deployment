@@ -35,9 +35,11 @@ terraform {
 
 # Read outputs from layer 1 (infrastructure)
 data "terraform_remote_state" "infrastructure" {
-  backend = "local"
+  backend = "s3"
   config = {
-    path = "../1-infrastructure/terraform.tfstate"
+    bucket = "shopease-terraform-state"
+    key    = "1-infrastructure/terraform.tfstate"
+    region = "us-east-1"
   }
 }
 
