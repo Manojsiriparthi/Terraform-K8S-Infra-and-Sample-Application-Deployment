@@ -163,29 +163,24 @@ variable "database_node_disk_size" {
 variable "gpu_node_instance_types" {
   description = "Instance types for GPU nodes (g4dn / p3 family)"
   type        = list(string)
-  default     = ["g4dn.xlarge"]
 }
 
 variable "gpu_node_desired_size" {
   description = "Desired number of GPU nodes"
   type        = number
-  default     = 1
 }
 
 variable "gpu_node_min_size" {
   description = "Minimum GPU nodes (0 = scale to zero when idle)"
   type        = number
-  default     = 0
 }
 
 variable "gpu_node_max_size" {
   description = "Maximum number of GPU nodes"
   type        = number
-  default     = 3
 }
 
 variable "gpu_node_disk_size" {
   description = "Root EBS volume size in GB for GPU nodes"
   type        = number
-  default     = 100
 }
