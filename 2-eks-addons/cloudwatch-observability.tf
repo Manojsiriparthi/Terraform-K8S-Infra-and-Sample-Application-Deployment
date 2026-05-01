@@ -101,7 +101,8 @@ resource "aws_eks_addon" "cloudwatch_observability" {
 
   cluster_name                = local.cluster_name
   addon_name                  = "amazon-cloudwatch-observability"
-  addon_version               = "v1.5.1-eksbuild.1"
+  # Let AWS choose the latest compatible version for EKS 1.32
+  # addon_version is optional - AWS will use the default version
   service_account_role_arn    = aws_iam_role.cloudwatch_observability[0].arn
   resolve_conflicts_on_update = "PRESERVE"
 
