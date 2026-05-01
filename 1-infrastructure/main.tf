@@ -27,7 +27,6 @@ module "vpc" {
   availability_zones   = var.availability_zones
   public_subnet_cidrs  = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
-  cluster_name         = local.cluster_name
   common_tags          = local.common_tags
 }
 
