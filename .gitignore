@@ -1,0 +1,188 @@
+# ============================================================================
+# GITIGNORE - Terraform & Kubernetes Project
+# ============================================================================
+# Excludes sensitive files, state files, and generated content from Git
+# ============================================================================
+
+# ── TERRAFORM FILES ──────────────────────────────────────────────────────────
+
+# Terraform state files - contain sensitive infrastructure data
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform directories
+.terraform/
+.terraform.lock.hcl
+
+# Terraform plan files - may contain sensitive data
+*.tfplan
+*.tfplan.*
+tfplan
+
+# Terraform variable files with sensitive data
+*.auto.tfvars
+*_override.tf
+*_override.tf.json
+
+# Terraform crash log files
+crash.log
+crash.*.log
+
+# ── AWS & CLOUD CREDENTIALS ──────────────────────────────────────────────────
+
+# AWS credentials
+.aws/
+aws-credentials
+*.pem
+*.key
+
+# Environment files with secrets
+.env
+.env.*
+!.env.example
+
+# ── KUBERNETES FILES ─────────────────────────────────────────────────────────
+
+# Kubernetes config files
+kubeconfig
+.kube/
+*.kubeconfig
+
+# Helm charts cache
+.helm/
+
+# ── DOCKER & BUILD FILES ─────────────────────────────────────────────────────
+
+# Docker build cache
+.docker/
+
+# Build artifacts
+dist/
+build/
+target/
+
+# ── IDE & EDITOR FILES ───────────────────────────────────────────────────────
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# ── OPERATING SYSTEM FILES ───────────────────────────────────────────────────
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ── LOGS & TEMPORARY FILES ───────────────────────────────────────────────────
+
+# Log files
+*.log
+logs/
+log/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# ── PROJECT SPECIFIC ─────────────────────────────────────────────────────────
+
+# Backup files created by scripts
+*.yaml.bak
+*.yml.bak
+*.json.bak
+
+# Generated files
+generated/
+output/
+
+# Local development files
+local/
+dev-local/
+
+# ── SECURITY & SECRETS ───────────────────────────────────────────────────────
+
+# Certificate files
+*.crt
+*.cert
+*.cer
+*.p12
+*.pfx
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# GPG keys
+*.gpg
+*.asc
+
+# ── PACKAGE MANAGERS ─────────────────────────────────────────────────────────
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Go
+vendor/
+
+# ── MONITORING & OBSERVABILITY ──────────────────────────────────────────────
+
+# Prometheus data
+prometheus_data/
+
+# Grafana data
+grafana_data/
+
+# ============================================================================
+# END OF GITIGNORE
+# ============================================================================
