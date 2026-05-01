@@ -24,10 +24,6 @@ resource "helm_release" "gateway_api_crds" {
     name  = "installCRDs"
     value = "true"
   }
-
-  tags = merge(local.common_tags, {
-    Name = "${local.cluster_name}-gateway-api-crds"
-  })
 }
 
 # Gateway API is already supported by AWS Load Balancer Controller

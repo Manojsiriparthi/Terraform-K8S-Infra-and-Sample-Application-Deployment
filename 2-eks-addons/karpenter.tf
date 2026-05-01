@@ -24,6 +24,8 @@ data "aws_caller_identity" "current" {}
 # ── KARPENTER IAM ROLE (IRSA) ─────────────────────────────────────────────────
 
 data "aws_iam_policy_document" "karpenter_assume_role" {
+  count = var.enable_karpenter ? 1 : 0
+
   statement {
     effect = "Allow"
     principals {
@@ -45,8 +47,10 @@ data "aws_iam_policy_document" "karpenter_assume_role" {
 }
 
 resource "aws_iam_role" "karpenter" {
+  count = var.enable_karpenter ? 1 : 0
+
   name               = "${var.project_name}-${var.environment}-karpenter"
-  assume_role_policy = data.aws_iam_policy_document.karpenter_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.karpenter_assume_role[0].json
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-karpenter"
@@ -55,6 +59,8 @@ resource "aws_iam_role" "karpenter" {
 
 # Karpenter needs to create/terminate EC2 instances, manage ENIs, etc.
 data "aws_iam_policy_document" "karpenter_policy" {
+  count = var.enable_karpenter ? 1 : 0
+
   # EC2 instance lifecycle management
   statement {
     effect = "Allow"
@@ -134,14 +140,16 @@ data "aws_iam_policy_document" "karpenter_policy" {
       "sqs:GetQueueUrl",
       "sqs:ReceiveMessage",
     ]
-    resources = [aws_sqs_queue.karpenter_interruption.arn]
+    resources = [aws_sqs_queue.karpenter_interruption[0].arn]
   }
 }
 
 resource "aws_iam_policy" "karpenter" {
+  count = var.enable_karpenter ? 1 : 0
+
   name        = "${var.project_name}-${var.environment}-karpenter"
   description = "Karpenter node provisioner permissions"
-  policy      = data.aws_iam_policy_document.karpenter_policy.json
+  policy      = data.aws_iam_policy_document.karpenter_policy[0].json
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-karpenter"
@@ -149,20 +157,26 @@ resource "aws_iam_policy" "karpenter" {
 }
 
 resource "aws_iam_role_policy_attachment" "karpenter" {
-  role       = aws_iam_role.karpenter.name
-  policy_arn = aws_iam_policy.karpenter.arn
+  count = var.enable_karpenter ? 1 : 0
+
+  role       = aws_iam_role.karpenter[0].name
+  policy_arn = aws_iam_policy.karpenter[0].arn
 }
 
 # ── NODE INSTANCE PROFILE ─────────────────────────────────────────────────────
 # Karpenter-provisioned nodes need an instance profile to assume the node role
 
 data "aws_iam_role" "node_role" {
+  count = var.enable_karpenter ? 1 : 0
+
   name = data.terraform_remote_state.infrastructure.outputs.eks_node_role_name
 }
 
 resource "aws_iam_instance_profile" "karpenter_node" {
+  count = var.enable_karpenter ? 1 : 0
+
   name = "${var.project_name}-${var.environment}-karpenter-node"
-  role = data.aws_iam_role.node_role.name
+  role = data.aws_iam_role.node_role[0].name
 
   tags = merge(local.common_tags, {
     Name = "${var.project_name}-${var.environment}-karpenter-node"
@@ -174,6 +188,8 @@ resource "aws_iam_instance_profile" "karpenter_node" {
 # and instance state change events. Karpenter drains nodes gracefully.
 
 resource "aws_sqs_queue" "karpenter_interruption" {
+  count = var.enable_karpenter ? 1 : 0
+
   name                      = "${var.project_name}-${var.environment}-karpenter"
   message_retention_seconds = 300  # 5 minutes — interruption notices are time-sensitive
   sqs_managed_sse_enabled   = true
@@ -184,7 +200,9 @@ resource "aws_sqs_queue" "karpenter_interruption" {
 }
 
 resource "aws_sqs_queue_policy" "karpenter_interruption" {
-  queue_url = aws_sqs_queue.karpenter_interruption.url
+  count = var.enable_karpenter ? 1 : 0
+
+  queue_url = aws_sqs_queue.karpenter_interruption[0].url
 
   policy = jsonencode({
     Version = "2012-10-17"

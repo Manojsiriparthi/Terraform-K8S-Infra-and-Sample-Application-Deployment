@@ -14,6 +14,8 @@
 # ============================================================================
 
 resource "helm_release" "vpa" {
+  count = var.enable_vpa ? 1 : 0
+
   name       = "vpa"
   repository = "https://charts.fairwinds.com/stable"
   chart      = "vpa"
