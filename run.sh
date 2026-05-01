@@ -205,6 +205,22 @@ build_docker_images() {
     aws ecr get-login-password --region ${AWS_REGION} | \
         docker login --username AWS --password-stdin ${ECR_REGISTRY}
     
+    # Function to create ECR repository if it doesn't exist
+    create_ecr_repo() {
+        local repo_name=$1
+        if ! aws ecr describe-repositories --repository-names ${repo_name} --region ${AWS_REGION} >/dev/null 2>&1; then
+            print_info "Creating ECR repository: ${repo_name}"
+            aws ecr create-repository \
+                --repository-name ${repo_name} \
+                --region ${AWS_REGION} \
+                --image-scanning-configuration scanOnPush=true \
+                --encryption-configuration encryptionType=AES256 \
+                --tags Key=Environment,Value=${ENVIRONMENT} Key=ManagedBy,Value=Terraform
+        else
+            print_info "ECR repository already exists: ${repo_name}"
+        fi
+    }
+    
     # Find all Dockerfiles in 3-application
     print_info "Finding all Dockerfiles in 3-application..."
     
@@ -213,15 +229,20 @@ build_docker_images() {
     
     for service in $BACKEND_SERVICES; do
         SERVICE_DIR="3-application/backend/services/${service}"
+        REPO_NAME="${ECR_PREFIX}-${service}"
+        
         if [ -f "${SERVICE_DIR}/Dockerfile" ]; then
+            # Create ECR repository if needed
+            create_ecr_repo ${REPO_NAME}
+            
             print_info "Building ${service}..."
-            docker build -t ${ECR_REGISTRY}/${ECR_PREFIX}-${service}:${IMAGE_TAG} \
-                         -t ${ECR_REGISTRY}/${ECR_PREFIX}-${service}:latest \
+            docker build -t ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG} \
+                         -t ${ECR_REGISTRY}/${REPO_NAME}:latest \
                          ${SERVICE_DIR}
             
             print_info "Pushing ${service} to ECR..."
-            docker push ${ECR_REGISTRY}/${ECR_PREFIX}-${service}:${IMAGE_TAG}
-            docker push ${ECR_REGISTRY}/${ECR_PREFIX}-${service}:latest
+            docker push ${ECR_REGISTRY}/${REPO_NAME}:${IMAGE_TAG}
+            docker push ${ECR_REGISTRY}/${REPO_NAME}:latest
         else
             print_warn "Dockerfile not found for ${service}"
         fi
@@ -229,15 +250,20 @@ build_docker_images() {
     
     # Frontend
     FRONTEND_DIR="3-application/frontend"
+    FRONTEND_REPO="${ECR_PREFIX}-frontend"
+    
     if [ -f "${FRONTEND_DIR}/Dockerfile" ]; then
+        # Create ECR repository if needed
+        create_ecr_repo ${FRONTEND_REPO}
+        
         print_info "Building frontend..."
-        docker build -t ${ECR_REGISTRY}/${ECR_PREFIX}-frontend:${IMAGE_TAG} \
-                     -t ${ECR_REGISTRY}/${ECR_PREFIX}-frontend:latest \
+        docker build -t ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG} \
+                     -t ${ECR_REGISTRY}/${FRONTEND_REPO}:latest \
                      ${FRONTEND_DIR}
         
         print_info "Pushing frontend to ECR..."
-        docker push ${ECR_REGISTRY}/${ECR_PREFIX}-frontend:${IMAGE_TAG}
-        docker push ${ECR_REGISTRY}/${ECR_PREFIX}-frontend:latest
+        docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:${IMAGE_TAG}
+        docker push ${ECR_REGISTRY}/${FRONTEND_REPO}:latest
     fi
     
     # Update 4-kubernetes-manifests with new image tags
