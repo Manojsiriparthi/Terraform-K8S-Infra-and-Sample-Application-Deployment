@@ -42,8 +42,11 @@ database_node_max_size       = 3
 database_node_disk_size      = 50            # Smaller disk for dev
 
 # GPU Node Group (taint: workload=gpu:NoSchedule)
-# DEV: COMMENTED OUT - No GPU nodes in development to save costs
-# Uncomment if GPU testing is needed
+# DEV: DISABLED - No GPU nodes in development to save costs
+enable_gpu_nodes = false
+
+# Uncomment below if GPU testing is needed
+# enable_gpu_nodes = true
 # gpu_node_instance_types = ["g4dn.xlarge"]
 # gpu_node_desired_size   = 0                # Start with 0
 # gpu_node_min_size       = 0

@@ -43,6 +43,7 @@ database_node_disk_size      = 100
 
 # GPU Node Group (taint: workload=gpu:NoSchedule)
 # PROD: GPU instances for ML/AI workloads
+enable_gpu_nodes            = true             # Enable GPU nodes in production
 gpu_node_instance_types = ["g4dn.xlarge"]  # NVIDIA T4 GPU, 4 vCPU, 16GB RAM
 gpu_node_desired_size   = 1                # Start with 1 GPU node
 gpu_node_min_size       = 0                # Can scale to zero when idle
