@@ -46,8 +46,13 @@ output "cluster_oidc_issuer_url" {
   value       = module.eks.cluster_oidc_issuer_url
 }
 
+output "cluster_oidc_provider_arn" {
+  description = "OIDC provider ARN for IRSA"
+  value       = module.eks.cluster_oidc_provider_arn
+}
+
 # IAM outputs consumed by 2-eks-addons
 output "eks_node_role_name" {
-  description = "EKS node IAM role name — used by 2-eks-addons to attach addon IRSA policies"
+  description = "EKS node IAM role name - used by 2-eks-addons to attach addon IRSA policies"
   value       = module.iam.eks_node_role_name
 }

@@ -17,3 +17,9 @@ output "cluster_oidc_issuer_url" {
   description = "OIDC issuer URL (without https://) — used by 2-eks-addons for IRSA"
   value       = replace(aws_eks_cluster.main.identity[0].oidc[0].issuer, "https://", "")
 }
+
+
+output "cluster_oidc_provider_arn" {
+  description = "OIDC provider ARN for IRSA"
+  value       = aws_iam_openid_connect_provider.eks.arn
+}
