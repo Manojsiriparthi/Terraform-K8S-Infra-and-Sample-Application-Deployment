@@ -173,9 +173,9 @@ destroy_infrastructure() {
     print_info "✅ Infrastructure destruction complete!"
 }
 
-# Function 3: Build Docker Images and Update Folder 4
-build_docker_images() {
-    print_header "OPTION 3: Build Docker Images & Update Folder 4"
+# Function 3: Build Docker Images and Deploy Kubernetes (Folder 4)
+build_and_deploy_kubernetes() {
+    print_header "OPTION 3: Build Images & Deploy Kubernetes (Folder 4)"
     
     get_aws_info
     
@@ -222,7 +222,7 @@ build_docker_images() {
     }
     
     # Find all Dockerfiles in 3-application
-    print_info "Finding all Dockerfiles in 3-application..."
+    print_info "Building and pushing Docker images..."
     
     # Backend services
     BACKEND_SERVICES="adservice cartservice checkoutservice currencyservice emailservice paymentservice productcatalogservice recommendationservice shippingservice"
@@ -274,32 +274,38 @@ build_docker_images() {
     cp backend-all.yaml backend-all.yaml.bak 2>/dev/null || true
     cp frontend.yaml frontend.yaml.bak 2>/dev/null || true
     
-    # Update image references
-    sed -i.tmp "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" backend-all.yaml
-    sed -i.tmp "s|<REGION>|${AWS_REGION}|g" backend-all.yaml
-    sed -i.tmp "s|shopease-[a-z]*-|${ECR_PREFIX}-|g" backend-all.yaml
-    sed -i.tmp "s|:[a-z0-9]*$|:${IMAGE_TAG}|g" backend-all.yaml
+    # Update image references - SMART approach: only update actual image lines
+    print_info "Updating image references in YAML files..."
     
-    sed -i.tmp "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" frontend.yaml
-    sed -i.tmp "s|<REGION>|${AWS_REGION}|g" frontend.yaml
-    sed -i.tmp "s|shopease-[a-z]*-|${ECR_PREFIX}-|g" frontend.yaml
-    sed -i.tmp "s|:[a-z0-9]*$|:${IMAGE_TAG}|g" frontend.yaml
+    # For each service, find its image line and update it precisely
+    for service in $BACKEND_SERVICES; do
+        ECR_REPO_NAME="${ECR_PREFIX}-${service}"
+        print_info "Updating ${service} image to ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"
+        
+        # Find the image line for this specific service and update it
+        sed -i.tmp "/name: ${service}/,/image:/ {
+            s|image: .*amazonaws\.com.*|image: ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}|
+        }" backend-all.yaml
+    done
+    
+    # Update frontend if it exists
+    if [ -f "frontend.yaml" ]; then
+        FRONTEND_ECR_REPO="${ECR_PREFIX}-frontend"
+        print_info "Updating frontend image to ${ECR_REGISTRY}/${FRONTEND_ECR_REPO}:${IMAGE_TAG}"
+        
+        # Find the frontend container and update its image line precisely
+        sed -i.tmp "/name: frontend/,/image:/ {
+            s|image: .*amazonaws\.com.*|image: ${ECR_REGISTRY}/${FRONTEND_ECR_REPO}:${IMAGE_TAG}|
+        }" frontend.yaml
+    fi
     
     rm -f *.tmp
     
-    cd ..
-    
     print_info "✅ Docker images built and pushed to ECR!"
-    print_info "✅ Folder 4 manifests updated with tag: ${IMAGE_TAG}"
-}
-
-# Function 4: Install Kubernetes (Folder 4) and Monitoring (Folder 5)
-install_kubernetes() {
-    print_header "OPTION 4: Install Kubernetes (Folders 4 & 5)"
+    print_info "✅ Manifests updated with tag: ${IMAGE_TAG}"
     
-    # Deploy Folder 4: Kubernetes Manifests
-    print_info "Step 1/2: Deploying 4-kubernetes-manifests..."
-    cd 4-kubernetes-manifests
+    # Deploy Kubernetes manifests
+    print_info "Deploying Kubernetes manifests..."
     
     # Deploy in order
     print_info "Creating namespace..."
@@ -333,10 +339,22 @@ install_kubernetes() {
     
     cd ..
     
-    print_info "✅ Folder 4 deployment complete!"
+    print_info "✅ Kubernetes deployment complete!"
+    
+    # Show status
+    echo ""
+    print_info "Deployment Status:"
+    kubectl get pods -n application
+    echo ""
+    kubectl get svc -n application
+}
+
+# Function 4: Install Monitoring (Folder 5)
+install_monitoring() {
+    print_header "OPTION 4: Install Monitoring (Folder 5)"
     
     # Deploy Folder 5: Monitoring
-    print_info "Step 2/2: Deploying 5-monitoring..."
+    print_info "Deploying 5-monitoring..."
     cd 5-monitoring
     
     if [ -f "deploy.sh" ]; then
@@ -349,16 +367,12 @@ install_kubernetes() {
     
     cd ..
     
-    print_info "✅ Kubernetes and Monitoring installation complete!"
+    print_info "✅ Monitoring installation complete!"
     
-    # Show status
+    # Show monitoring status
     echo ""
-    print_info "Deployment Status:"
-    kubectl get pods -n application
-    echo ""
-    kubectl get svc -n application
-    echo ""
-    kubectl get ingress -n application
+    print_info "Monitoring Status:"
+    kubectl get pods -n monitoring 2>/dev/null || print_warn "No pods in monitoring namespace"
 }
 
 # Function 5: Delete Monitoring (Folder 5) and Kubernetes (Folder 4)
@@ -456,8 +470,8 @@ show_menu() {
     echo ""
     echo "  1) Apply Infrastructure (Folders 1 & 2) - asks dev/prod tfvars"
     echo "  2) Destroy Infrastructure (Folders 2 & 1) - reverse order"
-    echo "  3) Build Docker Images & Update Folder 4 - creates ECR images"
-    echo "  4) Install Kubernetes & Monitoring (Folders 4 & 5)"
+    echo "  3) Build Images & Deploy Kubernetes (Folder 4) - builds ECR images and deploys apps"
+    echo "  4) Install Monitoring (Folder 5) - deploys monitoring stack"
     echo "  5) Delete Monitoring & Kubernetes (Folders 5 & 4) - reverse order"
     echo "  6) Show Outputs (All folders)"
     echo "  7) Exit"
@@ -473,8 +487,8 @@ main() {
         case $choice in
             1) apply_infrastructure ;;
             2) destroy_infrastructure ;;
-            3) build_docker_images ;;
-            4) install_kubernetes ;;
+            3) build_and_deploy_kubernetes ;;
+            4) install_monitoring ;;
             5) delete_kubernetes ;;
             6) show_outputs ;;
             7) print_info "Exiting..."; exit 0 ;;
@@ -488,3 +502,4 @@ main() {
 
 # Run main function
 main
+

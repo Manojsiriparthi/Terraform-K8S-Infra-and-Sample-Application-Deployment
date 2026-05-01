@@ -46,10 +46,11 @@ output "vpc_id" {
 output "core_addons" {
   description = "Core EKS managed addons versions"
   value = {
-    vpc_cni      = aws_eks_addon.vpc_cni.addon_version
-    kube_proxy   = aws_eks_addon.kube_proxy.addon_version
-    coredns      = aws_eks_addon.coredns.addon_version
-    pod_identity = aws_eks_addon.pod_identity.addon_version
+    vpc_cni          = aws_eks_addon.vpc_cni.addon_version
+    kube_proxy       = aws_eks_addon.kube_proxy.addon_version
+    coredns          = aws_eks_addon.coredns.addon_version
+    pod_identity     = aws_eks_addon.pod_identity.addon_version
+    ebs_csi_driver   = aws_eks_addon.ebs_csi_driver.addon_version
   }
 }
 
@@ -120,9 +121,47 @@ output "karpenter" {
 output "gateway_api" {
   description = "Gateway API CRDs details"
   value = {
-    helm_release_name = try(helm_release.gateway_api_crds[0].name, "not deployed")
-    helm_version      = try(helm_release.gateway_api_crds[0].version, "not deployed")
-    enabled           = var.enable_gateway_api
+    installed = var.enable_gateway_api ? "deployed via kubectl" : "not deployed"
+    enabled   = var.enable_gateway_api
+  }
+}
+
+# ── FLUENT BIT ───────────────────────────────────────────────────────────────
+
+output "fluent_bit" {
+  description = "Fluent Bit logging details"
+  value = {
+    role_arn          = try(aws_iam_role.fluent_bit[0].arn, "not deployed")
+    role_name         = try(aws_iam_role.fluent_bit[0].name, "not deployed")
+    helm_release_name = try(helm_release.fluent_bit[0].name, "not deployed")
+    helm_version      = try(helm_release.fluent_bit[0].version, "not deployed")
+    enabled           = var.enable_fluent_bit
+  }
+}
+
+# ── EXTERNAL DNS ─────────────────────────────────────────────────────────────
+
+output "external_dns" {
+  description = "External DNS details"
+  value = {
+    role_arn          = try(aws_iam_role.external_dns[0].arn, "not deployed")
+    role_name         = try(aws_iam_role.external_dns[0].name, "not deployed")
+    helm_release_name = try(helm_release.external_dns[0].name, "not deployed")
+    helm_version      = try(helm_release.external_dns[0].version, "not deployed")
+    enabled           = var.enable_external_dns
+  }
+}
+
+# ── CERT MANAGER ─────────────────────────────────────────────────────────────
+
+output "cert_manager" {
+  description = "Cert Manager details"
+  value = {
+    role_arn          = try(aws_iam_role.cert_manager[0].arn, "not deployed")
+    role_name         = try(aws_iam_role.cert_manager[0].name, "not deployed")
+    helm_release_name = try(helm_release.cert_manager[0].name, "not deployed")
+    helm_version      = try(helm_release.cert_manager[0].version, "not deployed")
+    enabled           = var.enable_cert_manager
   }
 }
 
@@ -155,6 +194,10 @@ output "deployment_summary" {
       vpa            = var.enable_vpa ? "deployed" : "disabled"
       karpenter      = var.enable_karpenter ? "deployed" : "disabled"
       gateway_api    = var.enable_gateway_api ? "deployed" : "disabled"
+      fluent_bit     = var.enable_fluent_bit ? "deployed" : "disabled"
+      external_dns   = var.enable_external_dns ? "deployed" : "disabled"
+      cert_manager   = var.enable_cert_manager ? "deployed" : "disabled"
     }
   }
 }
+

@@ -361,8 +361,9 @@ resource "kubectl_manifest" "karpenter_node_class" {
     metadata:
       name: default
     spec:
-      # Use EKS optimized AL2023 AMI — auto-updated by Karpenter
-      amiFamily: AL2023
+      # AMI selector - use EKS optimized AL2023 AMI
+      amiSelectorTerms:
+        - alias: al2023@latest
 
       # Discover subnets tagged for this cluster (private subnets only)
       subnetSelectorTerms:
@@ -376,9 +377,9 @@ resource "kubectl_manifest" "karpenter_node_class" {
             kubernetes.io/cluster/${local.cluster_name}: owned
 
       # Instance profile for nodes to assume the node IAM role
-      instanceProfile: ${aws_iam_instance_profile.karpenter_node[0].name}
+      role: ${data.aws_iam_role.node_role[0].name}
 
-      # EBS root volume — encrypted gp3
+      # EBS root volume - encrypted gp3
       blockDeviceMappings:
         - deviceName: /dev/xvda
           ebs:
@@ -468,7 +469,7 @@ resource "kubectl_manifest" "karpenter_nodepool_general" {
 
       # Node consolidation — remove underutilized nodes aggressively
       disruption:
-        consolidationPolicy: WhenUnderutilized
+        consolidationPolicy: WhenEmptyOrUnderutilized
         consolidateAfter: 30s
 
       # Limits — prevent runaway scaling
@@ -637,3 +638,4 @@ resource "kubectl_manifest" "karpenter_nodepool_gpu" {
 
   depends_on = [kubectl_manifest.karpenter_node_class]
 }
+

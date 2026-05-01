@@ -20,7 +20,7 @@
 
 resource "aws_iam_role" "bastion" {
   name        = "${var.project_name}-${var.environment}-bastion-role"
-  description = "Role for bastion EC2 instance — SSM access only"
+  description = "Role for bastion EC2 instance - SSM access only"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

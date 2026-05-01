@@ -8,21 +8,19 @@
 # Only enable this if you want to use Gateway API instead of Ingress resources.
 # ============================================================================
 
-# Install Gateway API CRDs
-resource "helm_release" "gateway_api_crds" {
+# Install Gateway API CRDs using kubectl
+resource "null_resource" "gateway_api_crds" {
   count = var.enable_gateway_api ? 1 : 0
 
-  name       = "gateway-api-crds"
-  repository = "https://gateway-api.github.io/gateway-api"
-  chart      = "gateway-api-crds"
-  namespace  = "gateway-system"
-  version    = "v1.2.1"
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+    EOT
+  }
 
-  create_namespace = true
-
-  set {
-    name  = "installCRDs"
-    value = "true"
+  # Trigger re-apply if cluster changes
+  triggers = {
+    cluster_name = local.cluster_name
   }
 }
 
@@ -47,3 +45,4 @@ resource "helm_release" "gateway_api_crds" {
 #   - name: http
 #     protocol: HTTP
 #     port: 80
+

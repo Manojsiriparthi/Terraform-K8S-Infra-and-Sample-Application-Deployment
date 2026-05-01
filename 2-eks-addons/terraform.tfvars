@@ -26,14 +26,14 @@ cost_center = "engineering"
 
 # Enable/Disable Addons
 enable_aws_load_balancer_controller = true
-enable_external_dns                 = false  # Set to true if you have a domain
-enable_cert_manager                 = false  # Set to true if you need TLS certs
+enable_external_dns                 = true   # Enabled - requires Route53 domain
+enable_cert_manager                 = false  # DISABLED - chart compatibility issue
 enable_metrics_server               = true
-enable_karpenter                    = false  # Set to true for advanced autoscaling
-enable_vpa                          = false  # Vertical Pod Autoscaler
-enable_fluent_bit                   = true   # Logging
+enable_karpenter                    = true   # Enabled - advanced autoscaling (FIXED)
+enable_vpa                          = true   # Enabled - Vertical Pod Autoscaler
+enable_fluent_bit                   = true   # Enabled - logging (delete existing first)
 enable_cloudwatch_observability     = true   # Monitoring
-enable_gateway_api                  = false  # Next-gen Ingress (optional)
+enable_gateway_api                  = true   # Enabled - Next-gen Ingress API (FIXED)
 
 # ============================================================================
 # NOTES:
@@ -44,3 +44,4 @@ enable_gateway_api                  = false  # Next-gen Ingress (optional)
 # - Karpenter is for advanced autoscaling (optional)
 # - Gateway API is for future migration from Ingress
 # ============================================================================
+
