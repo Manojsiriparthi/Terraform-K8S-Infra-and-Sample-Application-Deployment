@@ -1,3 +1,0 @@
-# This directory stores SSH keys
-# Keys are automatically generated during bastion deployment
-# All .pem and .pub files are gitignored for security
